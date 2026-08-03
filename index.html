@@ -1,1 +1,45 @@
-﻿
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Entry Point</title>
+  <style>
+    body {
+      font-family: -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+      background: #f5f5f5;
+    }
+    .box {
+      text-align: center;
+      padding: 2rem;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    a {
+      color: #ff4b4b;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h2>Redirecting to test environment...</h2>
+    <p>If it doesn't redirect automatically, <a id="link" href="#">click here</a></p>
+    <p style="color:#999; font-size: 0.85rem;">Last updated: <span id="ts"></span></p>
+  </div>
+  <script>
+    // Every time the cloudflare tunnel restarts, this line gets updated automatically
+    const currentUrl = "https://REPLACE-ME.trycloudflare.com";
+
+    document.getElementById("link").href = currentUrl;
+    document.getElementById("ts").innerText = new Date().toLocaleString();
+    window.location.href = currentUrl;
+  </script>
+</body>
+</html>
