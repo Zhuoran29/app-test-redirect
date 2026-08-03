@@ -59,7 +59,7 @@ $indexContent = Get-Content $indexPath -Raw
 
 # match "const currentUrl = " followed by any quote character, any content, any quote character, then ;
 # this avoids failures caused by smart quotes / curly quotes from some editors
-$pattern = 'const currentUrl\s*=\s*[''"“”].*?[''"“”]\s*;'
+$pattern = 'const currentUrl\s*=\s*[''"\u201C\u201D\u2018\u2019].*?[''"\u201C\u201D\u2018\u2019]\s*;'
 $replacement = "const currentUrl = `"$url`";"
 $newContent = [regex]::Replace($indexContent, $pattern, $replacement)
 
