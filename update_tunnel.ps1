@@ -56,11 +56,16 @@ if (-not (Test-Path $indexPath)) {
 }
 
 $indexContent = Get-Content $indexPath -Raw
-$newContent = [regex]::Replace($indexContent, 'const currentUrl = ".*?";', "const currentUrl = `"$url`";")
+
+# match "const currentUrl = " followed by any quote character, any content, any quote character, then ;
+# this avoids failures caused by smart quotes / curly quotes from some editors
+$pattern = 'const currentUrl\s*=\s*[''"“”].*?[''"“”]\s*;'
+$replacement = "const currentUrl = `"$url`";"
+$newContent = [regex]::Replace($indexContent, $pattern, $replacement)
 
 if ($newContent -eq $indexContent) {
-    Write-Host "WARNING: index.html content did not change. Check that it contains a line like:"
-    Write-Host '  const currentUrl = "https://...";'
+    Write-Host "WARNING: index.html content did not change. Here is the current line found (if any):"
+    Select-String -InputObject $indexContent -Pattern "currentUrl" | ForEach-Object { Write-Host $_.Line }
 } else {
     Set-Content -Path $indexPath -Value $newContent -NoNewline -Encoding UTF8
     Write-Host "index.html updated."
