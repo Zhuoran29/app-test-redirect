@@ -9,7 +9,6 @@ $RepoDir = Get-Location
 $LogFile = "$env:TEMP\cloudflared.log"
 $ErrFile = "$env:TEMP\cloudflared.err"
 
-# clean up old logs so we don't match a stale URL
 Remove-Item $LogFile -ErrorAction SilentlyContinue
 Remove-Item $ErrFile -ErrorAction SilentlyContinue
 
@@ -48,30 +47,14 @@ if (-not $url) {
 
 Write-Host "Got new URL: $url"
 
-$indexPath = Join-Path $RepoDir "index.html"
+$txtPath = Join-Path $RepoDir "current_url.txt"
 
-if (-not (Test-Path $indexPath)) {
-    Write-Host "ERROR: index.html not found at $indexPath"
-    exit 1
-}
+# overwrite current_url.txt with just the URL, no trailing newline issues
+Set-Content -Path $txtPath -Value $url -NoNewline -Encoding UTF8
 
-$indexContent = Get-Content $indexPath -Raw
+Write-Host "current_url.txt updated."
 
-# match "const currentUrl = " followed by any quote character, any content, any quote character, then ;
-# this avoids failures caused by smart quotes / curly quotes from some editors
-$pattern = 'const currentUrl\s*=\s*[''"\u201C\u201D\u2018\u2019].*?[''"\u201C\u201D\u2018\u2019]\s*;'
-$replacement = "const currentUrl = `"$url`";"
-$newContent = [regex]::Replace($indexContent, $pattern, $replacement)
-
-if ($newContent -eq $indexContent) {
-    Write-Host "WARNING: index.html content did not change. Here is the current line found (if any):"
-    Select-String -InputObject $indexContent -Pattern "currentUrl" | ForEach-Object { Write-Host $_.Line }
-} else {
-    Set-Content -Path $indexPath -Value $newContent -NoNewline -Encoding UTF8
-    Write-Host "index.html updated."
-}
-
-git add index.html
+git add current_url.txt
 git commit -m "Update tunnel URL to $url"
 git push
 

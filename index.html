@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0"> 
+  <meta http-equiv="Expires" content="0">
   <title>Test Entry Point</title>
   <style>
     body {
@@ -32,27 +32,45 @@
 </head>
 <body>
   <div class="box">
-    <h2>Redirecting to test environment in <span id="countdown">3</span>...</h2>
+    <h2 id="status">Loading latest test link...</h2>
     <p>If it doesn't redirect automatically, <a id="link" href="#">click here</a></p>
-    <p style="color:#999; font-size: 0.85rem;">Last updated: <span id="ts"></span></p>
+    <p style="color:#999; font-size: 0.85rem;">Last checked: <span id="ts"></span></p>
   </div>
   <script>
-    // Every time the cloudflare tunnel restarts, this line gets updated automatically
-    const currentUrl = "https://sounds-techniques-reasons-kde.trycloudflare.com";
+    // This URL always returns fresh content (no Pages CDN caching),
+    // unlike the current page which may be cached for a few minutes.
+    const RAW_URL_SOURCE = "https://raw.githubusercontent.com/Zhuoran29/app-test-redirect/main/current_url.txt";
 
-    document.getElementById("link").href = currentUrl;
-    document.getElementById("ts").innerText = new Date().toLocaleString();
+    const statusEl = document.getElementById("status");
+    const linkEl = document.getElementById("link");
+    const tsEl = document.getElementById("ts");
 
-    let secondsLeft = 3;
-    const countdownEl = document.getElementById("countdown");
-    const timer = setInterval(() => {
-      secondsLeft -= 1;
-      countdownEl.innerText = secondsLeft;
-      if (secondsLeft <= 0) {
-        clearInterval(timer);
-        window.location.href = currentUrl;
-      }
-    }, 1000);
+    // cache-bust the fetch itself just in case
+    fetch(RAW_URL_SOURCE + "?t=" + Date.now())
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch URL: " + res.status);
+        return res.text();
+      })
+      .then(text => {
+        const url = text.trim();
+        tsEl.innerText = new Date().toLocaleString();
+        linkEl.href = url;
+
+        let secondsLeft = 3;
+        statusEl.innerText = "Redirecting to test environment in " + secondsLeft + "...";
+        const timer = setInterval(() => {
+          secondsLeft -= 1;
+          statusEl.innerText = "Redirecting to test environment in " + secondsLeft + "...";
+          if (secondsLeft <= 0) {
+            clearInterval(timer);
+            window.location.href = url;
+          }
+        }, 1000);
+      })
+      .catch(err => {
+        statusEl.innerText = "Could not load test link. Please try again shortly.";
+        console.error(err);
+      });
   </script>
 </body>
 </html>
