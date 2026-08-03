@@ -1,38 +1,35 @@
-# 用法: 在你的 app-test-redirect 仓库目录下用 PowerShell 运行这个脚本
-# 它会启动 cloudflared，抓取新 URL，写入 index.html，然后自动 push 到 GitHub
-#
-# 运行方式（在仓库目录下打开 PowerShell）:
+# Usage: run this from inside your GitHub Pages repo directory (PowerShell)
 #   .\update_tunnel.ps1
 #
-# 如果提示"无法加载文件，因为在此系统上禁止运行脚本"，先执行一次（仅需一次）:
+# If you get "running scripts is disabled" error, run this once:
 #   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
-$StreamlitPort = 8501          # 你的 streamlit 端口，按需修改
-$RepoDir = Get-Location        # 假设脚本就在仓库根目录下运行
+$StreamlitPort = 8501
+$RepoDir = Get-Location
 $LogFile = "$env:TEMP\cloudflared.log"
+$ErrFile = "$env:TEMP\cloudflared.err"
 
-Write-Host "启动 cloudflared tunnel..."
+# clean up old logs so we don't match a stale URL
+Remove-Item $LogFile -ErrorAction SilentlyContinue
+Remove-Item $ErrFile -ErrorAction SilentlyContinue
 
-# 后台启动 cloudflared，把输出重定向到日志文件
+Write-Host "Starting cloudflared tunnel..."
+
 $process = Start-Process -FilePath "cloudflared" `
     -ArgumentList "tunnel --url http://localhost:$StreamlitPort" `
     -RedirectStandardOutput $LogFile `
-    -RedirectStandardError "$LogFile.err" `
+    -RedirectStandardError $ErrFile `
     -NoNewWindow -PassThru
 
-Write-Host "等待 tunnel URL 生成..."
+Write-Host "Waiting for tunnel URL..."
 
 $url = $null
 for ($i = 0; $i -lt 30; $i++) {
     Start-Sleep -Seconds 1
-    if (Test-Path $LogFile) {
-        $content = Get-Content $LogFile -Raw -ErrorAction SilentlyContinue
-    } else {
-        $content = ""
-    }
-    if (Test-Path "$LogFile.err") {
-        $content += Get-Content "$LogFile.err" -Raw -ErrorAction SilentlyContinue
-    }
+
+    $content = ""
+    if (Test-Path $LogFile) { $content += Get-Content $LogFile -Raw -ErrorAction SilentlyContinue }
+    if (Test-Path $ErrFile) { $content += Get-Content $ErrFile -Raw -ErrorAction SilentlyContinue }
 
     $match = [regex]::Match($content, 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com')
     if ($match.Success) {
@@ -42,27 +39,40 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 
 if (-not $url) {
-    Write-Host "没抓到 URL，检查 $LogFile 和 $LogFile.err 看看 cloudflared 是否正常启动"
+    Write-Host "ERROR: could not find tunnel URL."
+    Write-Host "Check these log files manually:"
+    Write-Host "  $LogFile"
+    Write-Host "  $ErrFile"
     exit 1
 }
 
-Write-Host "拿到新 URL: $url"
+Write-Host "Got new URL: $url"
 
-# 替换 index.html 里的 URL
 $indexPath = Join-Path $RepoDir "index.html"
-$indexContent = Get-Content $indexPath -Raw
-$indexContent = $indexContent -replace 'const currentUrl = ".*?";', "const currentUrl = `"$url`";"
-Set-Content -Path $indexPath -Value $indexContent -NoNewline
 
-# git 提交并推送
+if (-not (Test-Path $indexPath)) {
+    Write-Host "ERROR: index.html not found at $indexPath"
+    exit 1
+}
+
+$indexContent = Get-Content $indexPath -Raw
+$newContent = [regex]::Replace($indexContent, 'const currentUrl = ".*?";', "const currentUrl = `"$url`";")
+
+if ($newContent -eq $indexContent) {
+    Write-Host "WARNING: index.html content did not change. Check that it contains a line like:"
+    Write-Host '  const currentUrl = "https://...";'
+} else {
+    Set-Content -Path $indexPath -Value $newContent -NoNewline -Encoding UTF8
+    Write-Host "index.html updated."
+}
+
 git add index.html
 git commit -m "Update tunnel URL to $url"
 git push
 
-Write-Host "已更新并推送到 GitHub Pages，稍等几十秒生效。"
-Write-Host "cloudflared 正在后台运行 (PID: $($process.Id))。"
-Write-Host "测试结束后，运行下面这行来停止它:"
+Write-Host ""
+Write-Host "Done. cloudflared is running in the background (PID: $($process.Id))"
+Write-Host "To stop it later, run:"
 Write-Host "  Stop-Process -Id $($process.Id)"
 
-# 等待 cloudflared 进程结束（Ctrl+C 会中断这个等待，但 cloudflared 进程仍在后台运行）
 Wait-Process -Id $process.Id
