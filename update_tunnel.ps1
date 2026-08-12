@@ -1,9 +1,3 @@
-# Usage: run this from inside your GitHub Pages repo directory (PowerShell)
-#   .\update_tunnel.ps1
-#
-# If you get "running scripts is disabled" error, run this once:
-#   Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
-
 $StreamlitPort = 8501
 $RepoDir = Get-Location
 $LogFile = "$env:TEMP\cloudflared.log"
