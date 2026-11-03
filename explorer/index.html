@@ -1,0 +1,798 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><title>Treatment Train Explorer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap">
+<style>
+/* Layout: context bar -> Treatment Chain Design editor (unit library | stage lanes, waste disposal split into two paths)
+   -> constituent bar -> C/C0 chart stacked on the flow schematic (shared x columns)
+   -> unit details + constituent fate | warnings + export. Light theme matched to the app's .streamlit/config.toml. */
+:root{
+  color-scheme: light;
+  --bg:#EAF0F0; --surface:#F7FAFA; --fg:#13242B; --muted:#5A6D74; --line:#C5D1D3; --grid:#DFE7E8;
+  --accent:#0B6E78; --accent-soft:#D2E8E9; --accent-fg:#FFFFFF;
+  --bad:#B0352B; --bad-soft:#F6DEDA; --warn:#8A5A00; --warn-soft:#F6EBD3; --info-soft:#DCE8EE; --ok:#0B6E78; --ok-soft:#D2E8E9;
+  --water-clear:#8ECDE0; --water-murky:#8C6B42; --product:#8FCFE4; --brine:#4F6F8F; --solid:#7E6A50;
+  --band-pre:#E2ECEA; --band-desal:#DEE7EF; --band-post:#E7E7EE;
+  --oil:#C8871A; --tss:#7A573A; --hard:#7B66C2; --tds:#3E7597; --nh3:#3C8C4E; --toc:#5F7A1E; --fe:#B5532A; --btex:#B0448C;
+  --vapor:#93AEBA; --sludge:#6E5B43;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"Source Sans 3","Segoe UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:14.5px;line-height:1.5}
+.wrap{padding:14px 14px 24px;display:grid;gap:14px}
+h3{font-family:var(--f-display);font-weight:700;font-size:24px;line-height:1.1;margin:0}
+.label{font-family:var(--f-mono);font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;min-width:0}
+.pad{padding:12px 14px}
+.btn{font-family:var(--f-body);font-size:13px;font-weight:600;padding:5px 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.primary.confirm{background:var(--warn);border-color:var(--warn)}
+.btn.small{font-size:12px;padding:3px 9px}
+:is(.btn,.chip,select,input,.x,.sp):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select,input[type=number],input[type=text]{font-family:var(--f-body);font-size:13px;padding:4px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--fg);min-width:0}
+.hint{font-size:12px;color:var(--muted)}
+
+.ctx{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
+.ctx .item{font-size:13.5px}
+.ctx .item span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-right:6px}
+.ctx .btn{margin-left:auto}
+.ctx .sel{display:grid;gap:3px;min-width:0}
+.ctx .sel span{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.ctx select{max-width:300px}
+.phead{display:grid;gap:4px}
+.phead h1{font-family:var(--f-display);font-weight:700;font-size:clamp(28px,4vw,40px);line-height:1.05;margin:0}
+.phead .note{max-width:90ch}
+
+.editor{display:grid;grid-template-columns:minmax(0,270px) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:820px){.editor{grid-template-columns:minmax(0,1fr)}}
+.lib{display:grid;gap:10px;max-height:470px;overflow:auto;padding-right:4px}
+.libgrp{display:grid;gap:5px}
+.libgrp .chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);cursor:grab;user-select:none;-webkit-user-select:none;touch-action:none;font-size:13px;line-height:1.25;max-width:100%}
+.chip:hover{border-color:var(--accent)}
+.chip .t{font-size:10px;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0 4px;white-space:nowrap}
+.chip.generic{border-style:dashed}
+.chip.generic .t{color:var(--muted);border-color:var(--muted)}
+.lanes{display:grid;gap:8px}
+.lane{display:grid;grid-template-columns:minmax(0,175px) minmax(0,1fr);gap:10px;align-items:center;padding:7px 10px;border:1.5px dashed var(--line);border-radius:10px;transition:border-color .12s,background .12s,opacity .12s}
+@media (max-width:560px){.lane{grid-template-columns:minmax(0,1fr)}}
+.lname{font-family:var(--f-display);font-weight:700;font-size:19px;line-height:1.05}
+.lname small{display:block;font-family:var(--f-mono);font-weight:400;font-size:10.5px;color:var(--muted);letter-spacing:.02em}
+.strip{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px}
+.lane.ok{border-color:var(--accent)}
+.lane.over{background:var(--accent-soft)}
+.lane.no{opacity:.4}
+.lane.nohover{border-color:var(--bad);opacity:.75}
+.lane.fixed{border-style:solid;background:var(--surface)}
+.waste{display:grid;gap:7px;padding:7px 10px 9px;border:1px solid var(--line);border-radius:10px}
+.wtitle{font-family:var(--f-display);font-weight:700;font-size:19px}
+.lchip{background:var(--surface)}
+.lchip.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.lchip .n{font-family:var(--f-mono);font-size:10.5px;color:var(--muted)}
+.lchip .ed{width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.rchip{display:inline-flex;gap:6px;align-items:baseline;font-size:12.5px;padding:3px 9px;border-radius:8px;border:1px solid var(--line);background:var(--surface)}
+.rchip span{color:var(--muted);font-size:11.5px}
+.x{border:0;background:transparent;color:var(--muted);font-size:15px;line-height:1;padding:0 3px;cursor:pointer;border-radius:4px}
+.x:hover{color:var(--bad)}
+.slot{width:70px;height:26px;border:2px dashed var(--accent);border-radius:8px;background:var(--accent-soft)}
+.empty{color:var(--muted);font-size:12.5px}
+.ghost{position:fixed;z-index:60;pointer-events:none;opacity:.95;box-shadow:0 8px 22px rgba(0,0,0,.18);margin:0}
+.ghost .gmsg{position:absolute;top:-20px;left:0;font-size:11.5px;white-space:nowrap;color:var(--bad)}
+.msg{font-size:12.5px;color:var(--bad);min-height:1.2em}
+
+.spbar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.sps{display:flex;flex-wrap:wrap;gap:6px}
+.sp{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--muted);cursor:pointer;font-family:var(--f-body)}
+.sp[aria-pressed="true"]{color:var(--fg);border-color:var(--fg)}
+.sp .sw{width:10px;height:10px;display:inline-block}
+.sp[disabled]{opacity:.45;cursor:default}
+.addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+.stage{overflow:hidden}
+.cwrap{position:relative}
+canvas{display:block;width:100%;height:auto;max-width:100%}
+#chart{aspect-ratio:1200/250}
+#flow{aspect-ratio:1200/350;border-top:1px solid var(--line)}
+.tip{position:absolute;z-index:20;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 6px 18px rgba(0,0,0,.12);min-width:210px;max-width:320px}
+.tip b{font-size:12.5px}
+.tip table{border-collapse:collapse;width:100%;margin-top:4px;font-family:var(--f-mono);font-size:11.5px}
+.tip td{padding:1px 4px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.tip td:not(:first-child){text-align:right}
+
+.lower{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:900px){.lower{grid-template-columns:minmax(0,1fr)}}
+.col{display:grid;gap:14px;min-width:0}
+.panel{display:grid;gap:9px;align-content:start;min-width:0}
+.meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-family:var(--f-mono);font-size:12px;color:var(--muted)}
+.unote{font-size:12.5px;color:var(--muted);margin:0;padding:6px 9px;border-radius:6px;background:var(--info-soft)}
+.tablewrap{overflow-x:auto}
+.rtable{width:100%;border-collapse:collapse;font-size:13px}
+.rtable th{font-family:var(--f-mono);font-weight:500;font-size:11px;color:var(--muted);text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+.rtable td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+.rtable td.p{white-space:nowrap}
+.rtable td.raw{font-family:var(--f-mono);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.rtable .ctl{display:flex;gap:8px;align-items:center;min-width:200px}
+.rtable input[type=range]{flex:1;min-width:90px;accent-color:var(--accent);height:18px;background:transparent}
+.rtable input[type=number]{width:72px;font-family:var(--f-mono);font-size:12px;padding:3px 5px}
+.oor{font-size:10.5px;color:var(--warn);background:var(--warn-soft);border-radius:4px;padding:1px 5px;white-space:nowrap}
+.rg{font-size:11px;color:var(--accent);white-space:nowrap}
+.wlist{display:grid;gap:6px}
+.w{font-size:13px;padding:7px 10px;border-radius:8px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 9px;align-items:baseline}
+.w .k{font-family:var(--f-mono);font-size:10.5px;font-weight:500;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:4px;white-space:nowrap}
+.w .src{grid-column:2;font-size:11px;color:var(--muted)}
+.w.bad{background:var(--bad-soft)} .w.bad .k{color:var(--bad);border:1px solid var(--bad)}
+.w.warn{background:var(--warn-soft)} .w.warn .k{color:var(--warn);border:1px solid var(--warn)}
+.w.info{background:var(--info-soft)} .w.info .k{color:var(--accent);border:1px solid var(--accent)}
+.w.sug{background:var(--surface);border:1px dashed var(--accent)} .w.sug .k{color:var(--accent-fg);background:var(--accent);border:1px solid var(--accent)}
+.w .act{grid-column:2;display:flex;flex-wrap:wrap;gap:6px}
+.w.ok{background:var(--ok-soft)} .w.ok .k{color:var(--ok);border:1px solid var(--ok)}
+.fate{display:grid;gap:7px}
+.frow{display:grid;grid-template-columns:90px minmax(0,1fr) 258px;gap:10px;align-items:center;font-size:13px}
+.fbar{display:flex;height:14px;border-radius:3px;overflow:hidden;background:var(--grid)}
+.fbar span{display:block;height:100%}
+.fnum{font-family:var(--f-mono);font-size:11px;color:var(--muted);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.flegend{display:flex;flex-wrap:wrap;gap:4px 14px;font-family:var(--f-mono);font-size:11.5px;color:var(--muted)}
+.flegend i{display:inline-block;width:10px;height:10px;margin-right:5px;vertical-align:-1px}
+details summary{cursor:pointer;font-weight:600;font-size:13px}
+textarea{width:100%;box-sizing:border-box;min-height:150px;font-family:var(--f-mono);font-size:12px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px}
+.note{font-size:12px;color:var(--muted);margin:0}
+.ic{display:inline-block;vertical-align:-1px;margin-right:6px;flex:none}
+.sp .ic{margin-right:0}
+@media (prefers-reduced-motion: reduce){.lane{transition:none}}
+</style>
+
+<div class="wrap">
+  <header class="phead" id="pageHead" hidden>
+    <div class="label">NMPWRC TEA tool · Treatment train explorer</div>
+    <h1>Treatment Train Explorer</h1>
+    <p class="note">Drag units between stages to build a treatment train and see where each constituent is removed. Removal efficiencies, default trains, feed water quality and Fit-for-Purpose targets come from the TEA app configuration.</p>
+  </header>
+  <section class="ctx" id="ctx" aria-label="Scenario"></section>
+
+  <section class="card pad editor" aria-label="Treatment Chain Design">
+    <div class="lib">
+      <div class="label">Unit library · drag into a stage</div>
+      <div id="libgroups"></div>
+    </div>
+    <div class="lanes">
+      <div class="lane" data-stage="pretreatment"><div class="lname">Pretreatment</div><div class="strip"></div></div>
+      <div class="lane" data-stage="desalination"><div class="lname">Desalination</div><div class="strip"></div></div>
+      <div class="lane" data-stage="posttreatment"><div class="lname">Posttreatment</div><div class="strip"></div></div>
+      <div class="waste">
+        <div class="wtitle">Waste disposal</div>
+        <div class="lane" data-stage="brine"><div class="lname">Brine management<small id="brineCat"></small></div><div class="strip"></div></div>
+        <div class="lane fixed" data-stage="solid"><div class="lname">Sludge / solid waste<small>Collected to waste disposal</small></div><div class="strip" id="solidStrip"></div></div>
+      </div>
+      <div class="msg" id="msg" role="alert"></div>
+      <div class="hint">Click a unit to view and adjust its removal efficiencies · drag a unit out of its stage to remove it · Shift+←/→ moves the selected unit, Delete removes it</div>
+    </div>
+  </section>
+
+  <section class="card pad spbar" aria-label="Constituents">
+    <div class="label">Animated constituents</div>
+    <div class="sps" id="spAnim"></div>
+    <div class="addrow">
+      <select id="addParam" aria-label="Constituent to add to the chart"></select>
+      <button class="btn small" id="addParamBtn" type="button">Add to chart</button>
+      <button class="btn small" id="addCustomBtn" type="button">New constituent</button>
+    </div>
+    <div class="addrow" id="customRow" hidden>
+      <input type="text" id="cName" placeholder="Name, e.g. Lithium-7" aria-label="New constituent name">
+      <input type="number" id="cFeed" placeholder="Feed concentration" min="0" step="any" aria-label="Feed concentration">
+      <input type="text" id="cUnit" value="mg/L" aria-label="Unit" style="width:80px">
+      <button class="btn small" id="cAdd" type="button">Add</button>
+      <span class="hint">A new constituent starts with 0% removal in every unit; set removals in Unit details.</span>
+    </div>
+  </section>
+
+  <section class="card stage">
+    <div class="cwrap" id="cwrap">
+      <canvas id="chart" role="img" aria-label="Log-scale step chart of the remaining fraction of each constituent along the treatment train"></canvas>
+      <canvas id="flow" role="img" aria-label="Flow schematic with particles removed to brine management or to sludge and solid waste"></canvas>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+  </section>
+
+  <div class="lower">
+    <div class="col">
+      <section class="card pad panel" id="detail" aria-live="polite"></section>
+      <section class="card pad panel">
+        <div class="label">Where feed mass goes</div>
+        <div class="flegend"><span><i style="background:var(--product)"></i>Product water</span><span><i style="background:var(--brine)"></i>Brine management</span><span><i style="background:var(--solid)"></i>Sludge / solid waste</span></div>
+        <div class="fate" id="fate"></div>
+      </section>
+    </div>
+    <div class="col">
+      <section class="card pad panel">
+        <div class="label">Warnings and suggestions</div>
+        <div class="wlist" id="warns"></div>
+      </section>
+      <section class="card pad panel" id="applyCard">
+        <div class="label">Apply configuration</div>
+        <p class="note" id="applySummary"></p>
+        <div class="addrow"><button class="btn primary" id="applyBtn" type="button">Apply to Treatment Train</button><span class="hint" id="applyMsg"></span></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<p class="note" id="snapNote" hidden style="padding:0 14px 18px"></p>
+<script type="application/json" id="payload">{"scenario": {}, "params": {"pH": "-", "Oil": "mg/L", "Conductivity": "uS/cm", "TDS": "mg/L", "TSS": "mg/L", "Turbidity": "NTU", "Hardness": "mg/L as CaCO3", "Alkalinity": "mg/L as CaCO3", "TOC": "mg/L", "Ammonia nitrogen": "mg/L", "Boron": "mg/L", "Sodium": "mg/L", "Chloride": "mg/L", "Silica": "mg/L", "Iron": "mg/L", "Magnesium": "mg/L", "Manganese": "mg/L", "Calcium": "mg/L", "Barium": "mg/L", "Lithium": "mg/L", "Strontium": "mg/L", "Arsenic": "mg/L", "Selenium": "mg/L", "Fluoride": "mg/L", "Uranium": "mg/L", "SAR": "-", "Sulfate": "mg/L", "Bicarbonate": "mg/L", "BTEX": "mg/L", "Naphthalene": "mg/L", "Gross Alpha": "pCi/L", "Gross Beta": "pCi/L", "Radium-226": "pCi/L", "Radium-228": "pCi/L", "H2S": "mg/L"}, "library": {"pretreatment": ["3-phase separator", "DAF", "Chemical softening", "Electrocoagulation", "Walnut shell filtration", "Ultrafiltration", "Ammonia stripping", "Antiscalant / pH adjustment", "GAC"], "desalination": ["MVC", "Vacuum membrane distillation (VMD)", "LSRRO", "BWRO"], "posttreatment": ["Ammonia stripping", "GAC", "Zeolite", "Ion exchange"], "brine": ["Evaporation pond", "Saltwater disposal well"]}, "allowed": {"3-phase separator": ["pretreatment"], "DAF": ["pretreatment"], "Chemical softening": ["pretreatment"], "Electrocoagulation": ["pretreatment"], "Walnut shell filtration": ["pretreatment"], "Ultrafiltration": ["pretreatment"], "Ammonia stripping": ["pretreatment", "posttreatment"], "Antiscalant / pH adjustment": ["pretreatment"], "GAC": ["pretreatment", "posttreatment"], "MVC": ["desalination"], "Vacuum membrane distillation (VMD)": ["desalination"], "LSRRO": ["desalination"], "BWRO": ["desalination"], "Zeolite": ["posttreatment"], "Ion exchange": ["posttreatment"], "Evaporation pond": ["brine"], "Saltwater disposal well": ["brine"], "Cartridge filter": ["pretreatment"], "Ultra-fine filtration": ["pretreatment"], "Bag filter": ["pretreatment"], "Media filtration": ["pretreatment"], "Well pumping": ["pretreatment"], "Antiscalant dosing": ["pretreatment"], "Raw water storage": ["pretreatment"], "pH adjustment": ["desalination", "posttreatment"], "NF": ["desalination"], "Blending / remineralization": ["posttreatment"], "Boron-selective IX": ["posttreatment"], "Chlorination": ["posttreatment"], "Scale inhibitor dosing": ["posttreatment"], "Polishing filter": ["posttreatment"], "Biocide dosing": ["posttreatment"], "Fine filter": ["posttreatment"], "Polishing": ["posttreatment"], "Adjust TDS": ["posttreatment"], "Add additives": ["posttreatment"], "Hardness adjustment": ["posttreatment"], "Scale control": ["posttreatment"], "Selective ED": ["posttreatment"], "Blending / salinity adjustment": ["posttreatment"], "ZIX-Zak IX": ["posttreatment"], "Additives blending": ["posttreatment"], "Mineral precipitation / recovery": ["posttreatment"]}, "units": {"3-phase separator": {"name": "3-phase separator", "label": "3-phase separator", "mech": "float", "path": "solid", "residual": "Separated oil / solids", "note": "", "recovery": 0.995, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Oil": {"raw": "90-95%", "kind": "range", "default": 0.925, "low": 0.9, "high": 0.95}, "TSS": {"raw": "20-50%", "kind": "range", "default": 0.35, "low": 0.2, "high": 0.5}, "Turbidity": {"raw": "10-40%", "kind": "range", "default": 0.25, "low": 0.1, "high": 0.4}}}, "Add additives": {"name": "Add additives", "label": "Add additives", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Additives blending": {"name": "Additives blending", "label": "Additives blending", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Adjust TDS": {"name": "Adjust TDS", "label": "Adjust TDS", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Ammonia stripping": {"name": "Ammonia stripping", "label": "Ammonia stripping", "mech": "strip", "path": "solid", "residual": "Off-gas (NH3)", "note": "", "recovery": 0.95, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Ammonia nitrogen": {"raw": "99.9%", "kind": "fixed", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 0.9990000000000001}}}, "Antiscalant / pH adjustment": {"name": "Antiscalant / pH adjustment", "label": "Antiscalant / pH adjustment", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Antiscalant dosing": {"name": "Antiscalant dosing", "label": "Antiscalant dosing", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "BWRO": {"name": "BWRO", "label": "BWRO", "mech": "membrane", "path": "brine", "residual": "Concentrate", "note": "", "recovery": 0.9, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Conductivity": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "TDS": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Hardness": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Alkalinity": {"raw": "60-90%", "kind": "range", "default": 0.75, "low": 0.6, "high": 0.9}, "TOC": {"raw": "20-60%", "kind": "range", "default": 0.4, "low": 0.2, "high": 0.6}, "Ammonia nitrogen": {"raw": "90%", "kind": "fixed", "default": 0.9, "low": 0.9, "high": 0.9}, "Boron": {"raw": "20-70%", "kind": "range", "default": 0.45, "low": 0.2, "high": 0.7}, "Sodium": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Chloride": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Silica": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Arsenic": {"raw": "80-99%", "kind": "range", "default": 0.895, "low": 0.8, "high": 0.99}, "Fluoride": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Uranium": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Gross Alpha": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Gross Beta": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Radium-226": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Radium-228": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}}}, "Bag filter": {"name": "Bag filter", "label": "Bag filter", "mech": "media", "path": "solid", "residual": "Spent bags", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": false, "removals": {}}, "Biocide dosing": {"name": "Biocide dosing", "label": "Biocide dosing", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Blending / remineralization": {"name": "Blending / remineralization", "label": "Blending / remineralization", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Blending / salinity adjustment": {"name": "Blending / salinity adjustment", "label": "Blending / salinity adjustment", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Boron-selective IX": {"name": "Boron-selective IX", "label": "Boron-selective IX", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"Boron": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}}}, "Cartridge filter": {"name": "Cartridge filter", "label": "Cartridge filter", "mech": "media", "path": "solid", "residual": "Spent cartridges", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TSS": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Turbidity": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}}}, "Chemical softening": {"name": "Chemical softening", "label": "Chemical softening", "mech": "settle", "path": "solid", "residual": "Softening sludge", "note": "The TEA run uses the Reaktoro softening model; these are the removal-table values it falls back to.", "recovery": 0.97, "ph_target": 8.0, "has_model": true, "has_data": true, "removals": {"Hardness": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}, "Calcium": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}, "Magnesium": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}, "Barium": {"raw": "44%", "kind": "fixed", "default": 0.44, "low": 0.44, "high": 0.44}, "Strontium": {"raw": "4%", "kind": "fixed", "default": 0.04, "low": 0.04, "high": 0.04}, "Silica": {"raw": "34%", "kind": "fixed", "default": 0.34, "low": 0.34, "high": 0.34}, "Sulfate": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}}}, "Chlorination": {"name": "Chlorination", "label": "Chlorination", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": false, "removals": {}}, "DAF": {"name": "DAF", "label": "DAF", "mech": "float", "path": "solid", "residual": "DAF float", "note": "TOC removal is calculated by the DAF model from the H2O2 dose, which is set by DAF feed iron.", "recovery": 0.95, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Oil": {"raw": "87%", "kind": "fixed", "default": 0.87, "low": 0.87, "high": 0.87}, "TSS": {"raw": "87%", "kind": "fixed", "default": 0.87, "low": 0.87, "high": 0.87}, "Turbidity": {"raw": "87%", "kind": "fixed", "default": 0.87, "low": 0.87, "high": 0.87}, "Iron": {"raw": "87%", "kind": "fixed", "default": 0.87, "low": 0.87, "high": 0.87}}}, "Electrocoagulation": {"name": "Electrocoagulation", "label": "Electrocoagulation", "mech": "settle", "path": "solid", "residual": "EC sludge", "note": "", "recovery": 0.95, "ph_target": null, "has_model": true, "has_data": true, "removals": {"BTEX": {"raw": "98%", "kind": "fixed", "default": 0.98, "low": 0.98, "high": 0.98}, "Oil": {"raw": "77%", "kind": "fixed", "default": 0.77, "low": 0.77, "high": 0.77}, "Alkalinity": {"raw": "60%", "kind": "fixed", "default": 0.6, "low": 0.6, "high": 0.6}, "TSS": {"raw": "58%", "kind": "fixed", "default": 0.58, "low": 0.58, "high": 0.58}, "TOC": {"raw": "53%", "kind": "fixed", "default": 0.53, "low": 0.53, "high": 0.53}, "Barium": {"raw": "44%", "kind": "fixed", "default": 0.44, "low": 0.44, "high": 0.44}, "Hardness": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}, "Calcium": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}, "Magnesium": {"raw": "42%", "kind": "fixed", "default": 0.42, "low": 0.42, "high": 0.42}, "Silica": {"raw": "34%", "kind": "fixed", "default": 0.34, "low": 0.34, "high": 0.34}, "Chloride": {"raw": "16%", "kind": "fixed", "default": 0.16, "low": 0.16, "high": 0.16}, "Boron": {"raw": "6%", "kind": "fixed", "default": 0.06, "low": 0.06, "high": 0.06}, "Sodium": {"raw": "4%", "kind": "fixed", "default": 0.04, "low": 0.04, "high": 0.04}, "Strontium": {"raw": "4%", "kind": "fixed", "default": 0.04, "low": 0.04, "high": 0.04}}}, "Evaporation pond": {"name": "Evaporation pond", "label": "Evaporation pond", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.999999, "ph_target": null, "has_model": true, "has_data": true, "removals": {}}, "Fine filter": {"name": "Fine filter", "label": "Fine filter", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TSS": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Turbidity": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}}}, "GAC": {"name": "GAC", "label": "GAC", "mech": "media", "path": "solid", "residual": "Spent GAC", "note": "", "recovery": 0.995, "ph_target": null, "has_model": true, "has_data": true, "removals": {"TOC": {"raw": "74.98%", "kind": "fixed", "default": 0.7498, "low": 0.7498, "high": 0.7498}, "Oil": {"raw": "74.98%", "kind": "fixed", "default": 0.7498, "low": 0.7498, "high": 0.7498}, "BTEX": {"raw": "74.98%", "kind": "fixed", "default": 0.7498, "low": 0.7498, "high": 0.7498}, "Naphthalene": {"raw": "74.98%", "kind": "fixed", "default": 0.7498, "low": 0.7498, "high": 0.7498}}}, "Hardness adjustment": {"name": "Hardness adjustment", "label": "Hardness adjustment", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Ion exchange": {"name": "Ion exchange", "label": "Ion exchange", "mech": "media", "path": "brine", "residual": "Regenerant brine", "note": "", "recovery": 0.95, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Conductivity": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "TDS": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Hardness": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Ammonia nitrogen": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Boron": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Sodium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Chloride": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Sulfate": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Bicarbonate": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Calcium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Magnesium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Barium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Strontium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Arsenic": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Selenium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Fluoride": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Uranium": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Gross Alpha": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Gross Beta": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Radium-226": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Radium-228": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}}}, "LSRRO": {"name": "LSRRO", "label": "LSRRO", "mech": "membrane", "path": "brine", "residual": "Concentrate", "note": "Removal follows tea_models/lsrro_core.py (regression or average removal), so it changes with LSRRO feed concentration.", "recovery": 0.5, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Conductivity": {"raw": "99.21%", "kind": "fixed", "default": 0.9921, "low": 0.9921, "high": 0.9921}, "TDS": {"raw": "99.40%", "kind": "fixed", "default": 0.9940000000000001, "low": 0.9940000000000001, "high": 0.9940000000000001}, "TSS": {"raw": "93.12%", "kind": "fixed", "default": 0.9312, "low": 0.9312, "high": 0.9312}, "Turbidity": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Hardness": {"raw": "99.41%", "kind": "fixed", "default": 0.9941, "low": 0.9941, "high": 0.9941}, "Alkalinity": {"raw": "Regression", "kind": "regression", "default": null, "low": null, "high": null}, "TOC": {"raw": "91.55%", "kind": "fixed", "default": 0.9155, "low": 0.9155, "high": 0.9155}, "Ammonia nitrogen": {"raw": "Regression; average-removal fallback 98.38%", "kind": "regression", "default": null, "low": null, "high": null}, "Boron": {"raw": "98.11%", "kind": "fixed", "default": 0.9811, "low": 0.9811, "high": 0.9811}, "Sodium": {"raw": "99.24%", "kind": "fixed", "default": 0.9924, "low": 0.9924, "high": 0.9924}, "Chloride": {"raw": "Regression", "kind": "regression", "default": null, "low": null, "high": null}, "Silica": {"raw": "98.55%", "kind": "fixed", "default": 0.9854999999999999, "low": 0.9854999999999999, "high": 0.9854999999999999}, "Iron": {"raw": "98.41%", "kind": "fixed", "default": 0.9841, "low": 0.9841, "high": 0.9841}, "Manganese": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Calcium": {"raw": "Regression", "kind": "regression", "default": null, "low": null, "high": null}, "Barium": {"raw": "99.85%", "kind": "fixed", "default": 0.9984999999999999, "low": 0.9984999999999999, "high": 0.9984999999999999}, "Lithium": {"raw": "50-90%", "kind": "range", "default": 0.7, "low": 0.5, "high": 0.9}, "Strontium": {"raw": "99.63%", "kind": "fixed", "default": 0.9963, "low": 0.9963, "high": 0.9963}, "Arsenic": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Selenium": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Sulfate": {"raw": "87.97%", "kind": "fixed", "default": 0.8797, "low": 0.8797, "high": 0.8797}, "Bicarbonate": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Gross Alpha": {"raw": "99.36%", "kind": "fixed", "default": 0.9936, "low": 0.9936, "high": 0.9936}, "Gross Beta": {"raw": "99.32%", "kind": "fixed", "default": 0.9932, "low": 0.9932, "high": 0.9932}, "Radium-226": {"raw": "97.58%", "kind": "fixed", "default": 0.9758, "low": 0.9758, "high": 0.9758}, "Radium-228": {"raw": "99.82%", "kind": "fixed", "default": 0.9982, "low": 0.9982, "high": 0.9982}, "Oil": {"raw": "72.75%", "kind": "fixed", "default": 0.7275, "low": 0.7275, "high": 0.7275}, "TPH": {"raw": "94.08%", "kind": "fixed", "default": 0.9408, "low": 0.9408, "high": 0.9408}, "Naphthalene": {"raw": "91.55%", "kind": "fixed", "default": 0.9155, "low": 0.9155, "high": 0.9155}, "BTEX": {"raw": "Regression", "kind": "regression", "default": null, "low": null, "high": null}}}, "MVC": {"name": "MVC", "label": "MVC", "mech": "thermal", "path": "brine", "residual": "Brine", "note": "", "recovery": 0.45, "ph_target": 8.0, "has_model": true, "has_data": true, "removals": {"Oil": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Conductivity": {"raw": "99%+", "kind": "plus", "default": 0.99, "low": 0.99, "high": 1.0}, "TDS": {"raw": "99.385%", "kind": "fixed", "default": 0.99385, "low": 0.99385, "high": 0.99385}, "TSS": {"raw": "99%+", "kind": "plus", "default": 0.99, "low": 0.99, "high": 1.0}, "Turbidity": {"raw": "99%+", "kind": "plus", "default": 0.99, "low": 0.99, "high": 1.0}, "Hardness": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Alkalinity": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "TOC": {"raw": "20-80%", "kind": "range", "default": 0.5, "low": 0.2, "high": 0.8}, "Ammonia nitrogen": {"raw": "90%", "kind": "fixed", "default": 0.9, "low": 0.9, "high": 0.9}, "Boron": {"raw": "99%+", "kind": "plus", "default": 0.99, "low": 0.99, "high": 1.0}, "Sodium": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Chloride": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Silica": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Iron": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Manganese": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Calcium": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Barium": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Lithium": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Strontium": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Arsenic": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Selenium": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Sulfate": {"raw": "99.9%+", "kind": "plus", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 1.0}, "Bicarbonate": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "BTEX": {"raw": "50-90%", "kind": "range", "default": 0.7, "low": 0.5, "high": 0.9}, "Naphthalene": {"raw": "50-90%", "kind": "range", "default": 0.7, "low": 0.5, "high": 0.9}, "Gross Alpha": {"raw": "99.9%", "kind": "fixed", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 0.9990000000000001}, "Gross Beta": {"raw": "99.9%", "kind": "fixed", "default": 0.9990000000000001, "low": 0.9990000000000001, "high": 0.9990000000000001}, "Radium-226": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}, "Radium-228": {"raw": "99%", "kind": "fixed", "default": 0.99, "low": 0.99, "high": 0.99}}}, "Media filtration": {"name": "Media filtration", "label": "Media filtration", "mech": "media", "path": "solid", "residual": "Backwash", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TSS": {"raw": "70-90%", "kind": "range", "default": 0.8, "low": 0.7, "high": 0.9}, "Turbidity": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Iron": {"raw": "10-30%", "kind": "range", "default": 0.2, "low": 0.1, "high": 0.3}}}, "Mineral precipitation / recovery": {"name": "Mineral precipitation / recovery", "label": "Mineral precipitation / recovery", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"Hardness": {"raw": "50-95%", "kind": "range", "default": 0.725, "low": 0.5, "high": 0.95}, "Calcium": {"raw": "50-95%", "kind": "range", "default": 0.725, "low": 0.5, "high": 0.95}, "Magnesium": {"raw": "50-95%", "kind": "range", "default": 0.725, "low": 0.5, "high": 0.95}, "Sulfate": {"raw": "20-80%", "kind": "range", "default": 0.5, "low": 0.2, "high": 0.8}, "Silica": {"raw": "20-80%", "kind": "range", "default": 0.5, "low": 0.2, "high": 0.8}}}, "NF": {"name": "NF", "label": "NF", "mech": "membrane", "path": "brine", "residual": "Concentrate", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"Conductivity": {"raw": "30-80%", "kind": "range", "default": 0.55, "low": 0.3, "high": 0.8}, "TDS": {"raw": "30-80%", "kind": "range", "default": 0.55, "low": 0.3, "high": 0.8}, "Hardness": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Calcium": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Magnesium": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Sulfate": {"raw": "80-98%", "kind": "range", "default": 0.89, "low": 0.8, "high": 0.98}, "Arsenic": {"raw": "50-90%", "kind": "range", "default": 0.7, "low": 0.5, "high": 0.9}, "Uranium": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Gross Alpha": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Gross Beta": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Boron": {"raw": "10-40%", "kind": "range", "default": 0.25, "low": 0.1, "high": 0.4}}}, "Polishing": {"name": "Polishing", "label": "Polishing", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TSS": {"raw": "80-99%", "kind": "range", "default": 0.895, "low": 0.8, "high": 0.99}, "Turbidity": {"raw": "80-99%", "kind": "range", "default": 0.895, "low": 0.8, "high": 0.99}, "TOC": {"raw": "10-50%", "kind": "range", "default": 0.3, "low": 0.1, "high": 0.5}}}, "Polishing filter": {"name": "Polishing filter", "label": "Polishing filter", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TSS": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Turbidity": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}}}, "Raw water storage": {"name": "Raw water storage", "label": "Raw water storage", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Saltwater disposal well": {"name": "Saltwater disposal well", "label": "Saltwater disposal well", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": true, "has_data": true, "removals": {}}, "Scale control": {"name": "Scale control", "label": "Scale control", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Scale inhibitor dosing": {"name": "Scale inhibitor dosing", "label": "Scale inhibitor dosing", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "Selective ED": {"name": "Selective ED", "label": "Selective ED", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TDS": {"raw": "40-90%", "kind": "range", "default": 0.65, "low": 0.4, "high": 0.9}, "Conductivity": {"raw": "40-90%", "kind": "range", "default": 0.65, "low": 0.4, "high": 0.9}, "Sodium": {"raw": "40-90%", "kind": "range", "default": 0.65, "low": 0.4, "high": 0.9}, "Chloride": {"raw": "40-90%", "kind": "range", "default": 0.65, "low": 0.4, "high": 0.9}, "Sulfate": {"raw": "40-90%", "kind": "range", "default": 0.65, "low": 0.4, "high": 0.9}, "SAR": {"raw": "20-70%", "kind": "range", "default": 0.45, "low": 0.2, "high": 0.7}}}, "Ultra-fine filtration": {"name": "Ultra-fine filtration", "label": "Ultra-fine filtration", "mech": "membrane", "path": "solid", "residual": "Backwash", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": false, "removals": {}}, "Ultrafiltration": {"name": "Ultrafiltration", "label": "Ultrafiltration", "mech": "membrane", "path": "solid", "residual": "Backwash", "note": "", "recovery": 0.96, "ph_target": null, "has_model": true, "has_data": true, "removals": {"TSS": {"raw": "99%+", "kind": "plus", "default": 0.99, "low": 0.99, "high": 1.0}, "Turbidity": {"raw": "99%+", "kind": "plus", "default": 0.99, "low": 0.99, "high": 1.0}, "Oil": {"raw": "50-90%", "kind": "range", "default": 0.7, "low": 0.5, "high": 0.9}, "TOC": {"raw": "20-50%", "kind": "range", "default": 0.35, "low": 0.2, "high": 0.5}}}, "Vacuum membrane distillation (VMD)": {"name": "Vacuum membrane distillation (VMD)", "label": "VMD", "mech": "thermal", "path": "brine", "residual": "Brine", "note": "", "recovery": 0.5, "ph_target": null, "has_model": true, "has_data": true, "removals": {"pH": {"raw": "variable", "kind": "unknown", "default": 0.0, "low": null, "high": null}, "Oil": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Conductivity": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "TDS": {"raw": "99.5%", "kind": "fixed", "default": 0.995, "low": 0.995, "high": 0.995}, "TSS": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Turbidity": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Hardness": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Alkalinity": {"raw": "80-98%", "kind": "range", "default": 0.89, "low": 0.8, "high": 0.98}, "TOC": {"raw": "95%", "kind": "fixed", "default": 0.95, "low": 0.95, "high": 0.95}, "Ammonia nitrogen": {"raw": "90%", "kind": "fixed", "default": 0.9, "low": 0.9, "high": 0.9}, "Boron": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Sodium": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Chloride": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Silica": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Iron": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Manganese": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Calcium": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Barium": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Lithium": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Strontium": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Arsenic": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Selenium": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Sulfate": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Bicarbonate": {"raw": "80-95%", "kind": "range", "default": 0.875, "low": 0.8, "high": 0.95}, "Gross Alpha": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}, "Gross Beta": {"raw": "95-99%", "kind": "range", "default": 0.97, "low": 0.95, "high": 0.99}}}, "Walnut shell filtration": {"name": "Walnut shell filtration", "label": "Walnut shell filtration", "mech": "media", "path": "solid", "residual": "Backwash", "note": "", "recovery": 0.99, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Oil": {"raw": "80%", "kind": "fixed", "default": 0.8, "low": 0.8, "high": 0.8}, "TSS": {"raw": "80%", "kind": "fixed", "default": 0.8, "low": 0.8, "high": 0.8}, "Turbidity": {"raw": "80%", "kind": "fixed", "default": 0.8, "low": 0.8, "high": 0.8}, "TOC": {"raw": "60%", "kind": "fixed", "default": 0.6, "low": 0.6, "high": 0.6}, "Iron": {"raw": "50%", "kind": "fixed", "default": 0.5, "low": 0.5, "high": 0.5}, "H2S": {"raw": "75%", "kind": "fixed", "default": 0.75, "low": 0.75, "high": 0.75}}}, "Well pumping": {"name": "Well pumping", "label": "Well pumping", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {}}, "ZIX-Zak IX": {"name": "ZIX-Zak IX", "label": "ZIX-Zak IX", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.95, "ph_target": null, "has_model": false, "has_data": true, "removals": {"TDS": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Sodium": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Chloride": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Sulfate": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Arsenic": {"raw": "80-99%", "kind": "range", "default": 0.895, "low": 0.8, "high": 0.99}, "Fluoride": {"raw": "70-95%", "kind": "range", "default": 0.825, "low": 0.7, "high": 0.95}, "Uranium": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Gross Alpha": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Radium-226": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}, "Radium-228": {"raw": "90-99%", "kind": "range", "default": 0.945, "low": 0.9, "high": 0.99}}}, "Zeolite": {"name": "Zeolite", "label": "Zeolite", "mech": "media", "path": "brine", "residual": "Spent regenerant brine", "note": "", "recovery": 0.995, "ph_target": null, "has_model": true, "has_data": true, "removals": {"Ammonia nitrogen": {"raw": "95%", "kind": "fixed", "default": 0.95, "low": 0.95, "high": 0.95}}}, "pH adjustment": {"name": "pH adjustment", "label": "pH adjustment", "mech": "dose", "path": "brine", "residual": "", "note": "", "recovery": 0.999999, "ph_target": null, "has_model": false, "has_data": false, "removals": {}}}, "train": {"pretreatment": ["3-phase separator", "DAF", "Walnut shell filtration"], "desalination": ["MVC"], "posttreatment": ["GAC", "Zeolite"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "brine_category": "", "feed": {"Oil": 189.0, "TDS": 130000.0, "TOC": 103.5, "TSS": 342.9, "Alkalinity": 279.0, "Hardness": 12500.0, "Ammonia nitrogen": 500.0, "Barium": 5.6, "Iron": 25.7, "Boron": 42.3, "Calcium": 3800.0, "Magnesium": 745.0, "Silica": 107.0, "Sodium": 41000.0, "Strontium": 450.0, "Chloride": 78600.0, "Sulfate": 495.0, "Gross Alpha": 1105.0, "Gross Beta": 874.0, "Radium-226": 531.0, "Radium-228": 231.0, "Naphthalene": 16.0, "BTEX": 6.1}, "feed_ph": 6.4, "targets": {"pH": {"range": [6.5, 8.5], "unit": "-"}, "Conductivity": {"limit": 900.0, "unit": "uS/cm"}, "DO": {"limit": 4.0, "unit": "mg/L"}, "TDS": {"limit": 500.0, "unit": "mg/L"}, "TOC": {"limit": 5.0, "unit": "mg/L"}, "Ammonia nitrogen": {"limit": 0.5, "unit": "mg/L"}, "Oil": {"limit": 10.0, "unit": "mg/L"}, "Boron": {"limit": 4.0, "unit": "mg/L"}, "Chloride": {"limit": 250.0, "unit": "mg/L"}, "Hardness": {"limit": 150.0, "unit": "mg/L as CaCO3"}, "BTEX": {"limit": 2.0, "unit": "mg/L"}, "Naphthalene": {"limit": 0.2, "unit": "mg/L"}, "Gross Alpha": {"limit": 15.0, "unit": "pCi/L"}, "Gross Beta": {"limit": 15.0, "unit": "pCi/L"}}, "lsrro": {"regression": {"Alkalinity": [48.49, -0.4797, 0.00136], "Ammonia nitrogen": [-6.97, 0.0875, -0.000105], "BTEX": [0.00278, -0.00215, 0.000485], "Calcium": [11.85, -0.023595, 6.33e-06], "Chloride": [71.76, -0.00206, 6.47e-08]}, "average": {"TDS": 0.994, "TOC": 0.9155, "TSS": 0.9312, "Conductivity": 0.9921, "Hardness": 0.9941, "Ammonia nitrogen": 0.9838, "Barium": 0.9985, "Boron": 0.9811, "Magnesium": 0.9947, "Silica": 0.9855, "Sodium": 0.9924, "Strontium": 0.9963, "Iron": 0.9841, "Sulfate": 0.8797, "Gross Alpha": 0.9936, "Gross Beta": 0.9932, "Radium-226": 0.9758, "Radium-228": 0.9982, "Oil": 0.7275, "TPH": 0.9408, "Naphthalene": 0.9155}}, "daf_toc": [[0.0, 0.0], [0.01, 0.00016942070774016594], [0.01333521432163324, 0.00022592614482379005], [0.01778279410038923, 0.0003012773562085591], [0.023713737056616554, 0.0004017598115296176], [0.03162277660168379, 0.0005357553192566428], [0.042169650342858224, 0.0007144412006242371], [0.05623413251903491, 0.0009527226530529175], [0.07498942093324558, 0.0012704760767535681], [0.1, 0.0016942070774016596], [0.1333521432163324, 0.0022592614482379], [0.1778279410038923, 0.0030127735620855906], [0.23713737056616552, 0.004017598115296176], [0.31622776601683794, 0.0053575531925664265], [0.4216965034285822, 0.007144412006242371], [0.5623413251903491, 0.009527226530529174], [0.7498942093324559, 0.012704760767535685], [1.0, 0.016942070774016594], [1.333521432163324, 0.02259261448237901], [1.7782794100389228, 0.0301277356208559], [2.371373705661655, 0.040175981152961754], [3.1622776601683795, 0.05357553192566429], [4.216965034285822, 0.07144412006242372], [5.623413251903491, 0.09527226530529177], [7.498942093324558, 0.1270476076753568], [10.0, 0.16942070774016596], [13.33521432163324, 0.22592614482379006], [17.78279410038923, 0.3012773562085591], [23.71373705661655, 0.3383815829863335], [31.622776601683793, 0.35152111328684604], [42.169650342858226, 0.3646606435873586], [56.23413251903491, 0.37780017388787124], [74.98942093324558, 0.3909397041883838], [100.0, 0.4040792344888965], [133.3521432163324, 0.417218764789409], [177.82794100389228, 0.4303582950899215], [237.13737056616552, 0.4334687918191556], [316.22776601683796, 0.4320939210295353], [421.6965034285823, 0.430719050239915], [562.341325190349, 0.4293441794502948], [749.8942093324558, 0.42796930866067456], [1000.0, 0.42659443787105433]], "rules": [{"units": ["GAC"], "param": "TOC", "test": "missing", "kind": "Model input", "message": "Feed TOC is unavailable; GAC bed life and media OPEX are zero.", "source": "tea_models/technical_models/gac.py"}, {"units": ["Zeolite"], "param": "Ammonia nitrogen", "test": "missing", "kind": "Model input", "message": "Feed ammonia is unavailable; zeolite bed life is not calculated.", "source": "tea_models/technical_models/zeolite.py"}, {"units": ["Ammonia stripping"], "param": "Ammonia nitrogen", "test": "missing", "kind": "Model input", "message": "Feed ammonia is unavailable or zero; ammonia stripping removal is zero.", "source": "tea_models/technical_models/ammonia_stripping.py"}, {"units": ["DAF"], "param": "Iron", "test": "missing", "kind": "Model input", "message": "Feed iron is zero or missing: no H2O2 is dosed and the calculated TOC and H2S removals are zero.", "source": "tea_models/technical_models/daf.py"}, {"units": ["BWRO", "LSRRO"], "param": "Oil", "test": "gt", "value": 0.1, "kind": "Membrane feed", "message": "Oil and grease entering the RO is about {value} mg/L; the vendor guideline maximum is 0.1 mg/L (membrane fouling).", "source": "Aquaporin Industrial RO User Manual, Operation Guide (July 2023): feed water guidelines"}, {"units": ["BWRO", "LSRRO"], "param": "Iron", "test": "gt", "value": 0.5, "kind": "Membrane feed", "message": "Iron entering the RO is about {value} mg/L; the vendor guideline maximum for ferric iron is 0.5 mg/L.", "source": "Aquaporin Industrial RO User Manual, Operation Guide (July 2023): feed water guidelines"}, {"units": ["BWRO", "LSRRO"], "param": "Manganese", "test": "gt", "value": 0.5, "kind": "Membrane feed", "message": "Manganese entering the RO is about {value} mg/L; the vendor guideline maximum is 0.5 mg/L.", "source": "Aquaporin Industrial RO User Manual, Operation Guide (July 2023): feed water guidelines"}, {"units": ["BWRO", "LSRRO"], "param": "Turbidity", "test": "gt", "value": 1.0, "kind": "Membrane feed", "message": "Turbidity entering the RO is about {value} NTU; the vendor guideline maximum is 1 NTU.", "source": "Aquaporin Industrial RO User Manual, Operation Guide (July 2023): feed water guidelines"}, {"units": ["BWRO", "LSRRO"], "param": "TOC", "test": "gt", "value": 3.0, "kind": "Membrane feed", "message": "TOC entering the RO is about {value} mg/L; the vendor guideline maximum is 3 mg/L (organic fouling).", "source": "Aquaporin Industrial RO User Manual, Operation Guide (July 2023): feed water guidelines"}], "literature": [{"unit": "GAC", "param": "Naphthalene", "value": 0.98, "note": "The removal-table value is the TOC removal from one NMSU simulation applied to all organics.", "source": "https://par.nsf.gov/servlets/purl/10601094"}], "scaling": {"train": [], "rows": []}, "removal_overrides": {}, "standalone": {"start": {"water": "Produced water", "level": "Medium", "ffp": "Surface water discharge", "desal": "Mechanical Vapor Compression (MVC)"}, "feeds": {"Produced water": {"Low": {"feed": {"Oil": 67.0, "TDS": 100000.0, "TOC": 12.6, "TSS": 850.0, "Alkalinity": 132.0, "Hardness": 4200.0, "Ammonia nitrogen": 350.0, "Barium": 2.2, "Iron": 19.5, "Boron": 17.2, "Calcium": 1200.0, "Magnesium": 295.0, "Silica": 47.5, "Sodium": 33600.0, "Strontium": 235.0, "Chloride": 58900.0, "Sulfate": 251.0, "Gross Alpha": 760.0, "Gross Beta": 556.0, "Radium-226": 237.0, "Radium-228": 89.0, "Naphthalene": 11.0, "BTEX": 4.5}, "ph": 6.4}, "Medium": {"feed": {"Oil": 189.0, "TDS": 130000.0, "TOC": 103.5, "TSS": 342.9, "Alkalinity": 279.0, "Hardness": 12500.0, "Ammonia nitrogen": 500.0, "Barium": 5.6, "Iron": 25.7, "Boron": 42.3, "Calcium": 3800.0, "Magnesium": 745.0, "Silica": 107.0, "Sodium": 41000.0, "Strontium": 450.0, "Chloride": 78600.0, "Sulfate": 495.0, "Gross Alpha": 1105.0, "Gross Beta": 874.0, "Radium-226": 531.0, "Radium-228": 231.0, "Naphthalene": 16.0, "BTEX": 6.1}, "ph": 6.4}, "High": {"feed": {"Oil": 346.0, "TDS": 180000.0, "TOC": 213.1, "TSS": 790.0, "Alkalinity": 870.0, "Hardness": 27800.0, "Ammonia nitrogen": 750.0, "Barium": 12.0, "Iron": 49.8, "Boron": 76.5, "Calcium": 8200.0, "Magnesium": 1800.0, "Silica": 195.0, "Sodium": 49000.0, "Strontium": 1404.0, "Chloride": 102000.0, "Sulfate": 950.0, "Gross Alpha": 1630.0, "Gross Beta": 1230.0, "Radium-226": 970.0, "Radium-228": 346.0, "Naphthalene": 19.0, "BTEX": 10.2}, "ph": 6.4}}, "Brackish groundwater": {"Low": {"feed": {"TDS": 1500.0, "TSS": 5.0, "Turbidity": 2.0, "Alkalinity": 180.0, "Hardness": 250.0, "Calcium": 70.0, "Magnesium": 20.0, "Sodium": 300.0, "Chloride": 250.0, "Sulfate": 250.0, "Bicarbonate": 250.0, "Boron": 0.8, "Silica": 15.0, "Iron": 0.3, "Manganese": 0.05, "Arsenic": 0.01, "Fluoride": 1.0, "Uranium": 0.005, "Gross Alpha": 10.0, "Gross Beta": 10.0, "Radium-226": 2.0, "Radium-228": 2.0, "SAR": 2.0}, "ph": 7.4}, "Medium": {"feed": {"TDS": 5000.0, "TSS": 10.0, "Turbidity": 5.0, "Alkalinity": 350.0, "Hardness": 600.0, "Calcium": 180.0, "Magnesium": 40.0, "Sodium": 1200.0, "Chloride": 900.0, "Sulfate": 900.0, "Bicarbonate": 500.0, "Boron": 2.0, "Silica": 25.0, "Iron": 0.8, "Manganese": 0.1, "Arsenic": 0.02, "Fluoride": 2.0, "Uranium": 0.01, "Gross Alpha": 30.0, "Gross Beta": 20.0, "Radium-226": 5.0, "Radium-228": 5.0, "SAR": 4.0}, "ph": 7.3}, "High": {"feed": {"TDS": 12000.0, "TSS": 25.0, "Turbidity": 10.0, "Alkalinity": 900.0, "Hardness": 1500.0, "Calcium": 450.0, "Magnesium": 100.0, "Sodium": 3600.0, "Chloride": 3100.0, "Sulfate": 4400.0, "Bicarbonate": 1800.0, "Boron": 8.0, "Silica": 35.0, "Iron": 3.0, "Manganese": 0.2, "Arsenic": 0.05, "Fluoride": 4.0, "Uranium": 0.02, "Gross Alpha": 100.0, "Gross Beta": 50.0, "Radium-226": 10.0, "Radium-228": 10.0, "SAR": 8.0}, "ph": 7.2}}}, "ffps": ["Surface water discharge", "Agricultural use", "Drinking water quality oriented(e.g. groundwater recharge)", "Powerplant cooling water", "Data center cooling water", "Feedwater to UPW production", "On-site O&G hydraulic fracturing recirculation", "Brine valorization(In progress)"], "desal_types": ["Mechanical Vapor Compression (MVC)", "Vacuum membrane distillation (VMD)", "Low-salt rejection reverse osmosis (LSRRO)", "Brackish-water reverse osmosis (BWRO)"], "targets": {"Surface water discharge": {"pH": {"range": [6.5, 8.5], "unit": "-"}, "Conductivity": {"limit": 900.0, "unit": "uS/cm"}, "DO": {"limit": 4.0, "unit": "mg/L"}, "TDS": {"limit": 500.0, "unit": "mg/L"}, "TOC": {"limit": 5.0, "unit": "mg/L"}, "Ammonia nitrogen": {"limit": 0.5, "unit": "mg/L"}, "Oil": {"limit": 10.0, "unit": "mg/L"}, "Boron": {"limit": 4.0, "unit": "mg/L"}, "Chloride": {"limit": 250.0, "unit": "mg/L"}, "Hardness": {"limit": 150.0, "unit": "mg/L as CaCO3"}, "BTEX": {"limit": 2.0, "unit": "mg/L"}, "Naphthalene": {"limit": 0.2, "unit": "mg/L"}, "Gross Alpha": {"limit": 15.0, "unit": "pCi/L"}, "Gross Beta": {"limit": 15.0, "unit": "pCi/L"}}, "Agricultural use": {"pH": {"range": [6.5, 8.4], "unit": "-"}, "TDS": {"limit": 450.0, "unit": "mg/L"}, "Conductivity": {"limit": 700.0, "unit": "uS/cm"}, "SAR": {"limit": 3.0, "unit": "-"}, "Boron": {"limit": 0.7, "unit": "mg/L"}, "Sodium": {"limit": 70.0, "unit": "mg/L"}, "Chloride": {"limit": 140.0, "unit": "mg/L"}, "Manganese": {"limit": 0.02, "unit": "mg/L"}, "Iron": {"limit": 5.0, "unit": "mg/L"}, "Lithium": {"limit": 2.5, "unit": "mg/L"}, "Arsenic": {"limit": 0.1, "unit": "mg/L"}, "Selenium": {"limit": 0.02, "unit": "mg/L"}, "Bicarbonate": {"limit": 1.5, "unit": "mg/L"}}, "Drinking water quality oriented(e.g. groundwater recharge)": {"pH": {"range": [6.5, 8.5], "unit": "-"}, "TDS": {"limit": 500.0, "unit": "mg/L"}, "Turbidity": {"limit": 0.3, "unit": "NTU"}, "Hardness": {"limit": 150.0, "unit": "mg/L as CaCO3"}, "Iron": {"limit": 0.3, "unit": "mg/L"}, "Manganese": {"limit": 0.05, "unit": "mg/L"}, "Arsenic": {"limit": 0.01, "unit": "mg/L"}}, "Powerplant cooling water": {"TSS": {"limit": 10.0, "unit": "mg/L"}, "Oil": {"limit": 5.0, "unit": "mg/L"}, "Conductivity": {"limit": 5000.0, "unit": "uS/cm"}, "Hardness": {"limit": 500.0, "unit": "mg/L as CaCO3"}, "Alkalinity": {"limit": 300.0, "unit": "mg/L as CaCO3"}, "Silica": {"limit": 40.0, "unit": "mg/L"}, "TOC": {"limit": 5.0, "unit": "mg/L"}}, "Data center cooling water": {"TSS": {"limit": 5.0, "unit": "mg/L"}, "Conductivity": {"limit": 2000.0, "unit": "uS/cm"}, "Hardness": {"limit": 100.0, "unit": "mg/L as CaCO3"}, "Silica": {"limit": 20.0, "unit": "mg/L"}, "TOC": {"limit": 3.0, "unit": "mg/L"}, "Microbes": {"limit": 10000.0, "unit": "CFU/mL"}}, "Feedwater to UPW production": {"TDS": {"limit": 190.0, "unit": "mg/L"}, "Conductivity": {"limit": 330.0, "unit": "uS/cm"}, "Hardness": {"limit": 130.0, "unit": "mg/L as CaCO3"}, "TOC": {"limit": 2.8, "unit": "mg/L"}, "Silica": {"limit": 19.0, "unit": "mg/L"}, "Iron": {"limit": 0.2, "unit": "mg/L"}, "Manganese": {"limit": 0.04, "unit": "mg/L"}, "Turbidity": {"limit": 0.1, "unit": "NTU"}, "Ammonia nitrogen": {"limit": 0.0, "unit": "mg/L"}}, "On-site O&G hydraulic fracturing recirculation": {"TSS": {"limit": 50.0, "unit": "mg/L"}, "Oil": {"limit": 10.0, "unit": "mg/L"}, "Iron": {"limit": 50.0, "unit": "mg/L"}, "Bacteria": {"limit": 1000.0, "unit": "CFU/mL"}, "Barium": {"limit": 20.0, "unit": "mg/L"}, "Sulfate": {"limit": 50.0, "unit": "mg/L"}}, "Brine valorization(In progress)": {"TSS": {"limit": 10.0, "unit": "mg/L"}, "Oil": {"limit": 5.0, "unit": "mg/L"}, "Hardness": {"limit": 100.0, "unit": "mg/L as CaCO3"}, "Silica": {"limit": 20.0, "unit": "mg/L"}, "Barium": {"limit": 5.0, "unit": "mg/L"}, "Sr2+": {"limit": 10.0, "unit": "mg/L"}, "Sulfate": {"limit": 50.0, "unit": "mg/L"}}}, "default_trains": {"Produced water|Surface water discharge|Mechanical Vapor Compression (MVC)": {"pretreatment": ["3-phase separator", "DAF", "Walnut shell filtration"], "desalination": ["MVC"], "posttreatment": ["GAC", "Zeolite"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Surface water discharge|Vacuum membrane distillation (VMD)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["GAC", "Zeolite"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Surface water discharge|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["LSRRO"], "posttreatment": ["GAC", "Zeolite"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Surface water discharge|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["BWRO"], "posttreatment": ["GAC", "Zeolite"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Agricultural use|Mechanical Vapor Compression (MVC)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["MVC"], "posttreatment": ["Blending / remineralization", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Agricultural use|Vacuum membrane distillation (VMD)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["Blending / remineralization", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Agricultural use|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["LSRRO"], "posttreatment": ["Boron-selective IX", "Blending / remineralization", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Agricultural use|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["BWRO"], "posttreatment": ["Boron-selective IX", "Blending / remineralization", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Drinking water quality oriented(e.g. groundwater recharge)|Mechanical Vapor Compression (MVC)": {"pretreatment": ["DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["MVC"], "posttreatment": ["Blending / remineralization", "pH adjustment", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Drinking water quality oriented(e.g. groundwater recharge)|Vacuum membrane distillation (VMD)": {"pretreatment": ["DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["Blending / remineralization", "pH adjustment", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Drinking water quality oriented(e.g. groundwater recharge)|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["LSRRO"], "posttreatment": ["Blending / remineralization", "pH adjustment", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Drinking water quality oriented(e.g. groundwater recharge)|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["DAF", "Ultrafiltration", "Chemical softening", "Antiscalant / pH adjustment"], "desalination": ["BWRO"], "posttreatment": ["Blending / remineralization", "pH adjustment", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Powerplant cooling water|Mechanical Vapor Compression (MVC)": {"pretreatment": ["DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["MVC"], "posttreatment": ["GAC", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Powerplant cooling water|Vacuum membrane distillation (VMD)": {"pretreatment": ["DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["GAC", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Powerplant cooling water|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["LSRRO"], "posttreatment": ["GAC", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Powerplant cooling water|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["DAF", "Cartridge filter"], "desalination": ["BWRO"], "posttreatment": ["Scale inhibitor dosing", "Polishing filter"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Data center cooling water|Mechanical Vapor Compression (MVC)": {"pretreatment": ["DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["MVC"], "posttreatment": ["GAC", "GAC", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Data center cooling water|Vacuum membrane distillation (VMD)": {"pretreatment": ["DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["Ion exchange", "GAC", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Data center cooling water|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["LSRRO"], "posttreatment": ["GAC", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Data center cooling water|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["DAF", "Ultra-fine filtration"], "desalination": ["BWRO"], "posttreatment": ["Biocide dosing", "Fine filter", "Polishing"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Feedwater to UPW production|Mechanical Vapor Compression (MVC)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration"], "desalination": ["MVC", "pH adjustment", "BWRO"], "posttreatment": ["Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Feedwater to UPW production|Vacuum membrane distillation (VMD)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["GAC", "Zeolite", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Feedwater to UPW production|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["DAF", "Ammonia stripping", "Ultrafiltration"], "desalination": ["LSRRO"], "posttreatment": ["GAC", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Feedwater to UPW production|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["DAF", "Ammonia stripping", "Ultrafiltration"], "desalination": ["BWRO"], "posttreatment": ["GAC", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|On-site O&G hydraulic fracturing recirculation|Mechanical Vapor Compression (MVC)": {"pretreatment": ["3-phase separator", "DAF", "Chemical softening", "Bag filter", "Antiscalant / pH adjustment"], "desalination": ["MVC"], "posttreatment": ["pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|On-site O&G hydraulic fracturing recirculation|Vacuum membrane distillation (VMD)": {"pretreatment": ["3-phase separator", "DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|On-site O&G hydraulic fracturing recirculation|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["3-phase separator", "DAF", "Chemical softening", "Ultrafiltration", "Antiscalant / pH adjustment"], "desalination": ["LSRRO"], "posttreatment": ["pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|On-site O&G hydraulic fracturing recirculation|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["DAF", "Bag filter"], "desalination": ["BWRO"], "posttreatment": ["Adjust TDS", "Add additives"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Brine valorization(In progress)|Mechanical Vapor Compression (MVC)": {"pretreatment": ["DAF", "Media filtration"], "desalination": ["MVC"], "posttreatment": ["Hardness adjustment", "Scale control"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Brine valorization(In progress)|Vacuum membrane distillation (VMD)": {"pretreatment": ["DAF", "Media filtration"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["Hardness adjustment", "Scale control"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Brine valorization(In progress)|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["DAF", "Media filtration"], "desalination": ["LSRRO"], "posttreatment": ["Hardness adjustment", "Scale control"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Produced water|Brine valorization(In progress)|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["DAF", "Media filtration"], "desalination": ["BWRO"], "posttreatment": ["Hardness adjustment", "Scale control"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Surface water discharge|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter"], "desalination": ["BWRO", "MVC"], "posttreatment": ["GAC", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Surface water discharge|Vacuum membrane distillation (VMD)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter"], "desalination": ["BWRO", "Vacuum membrane distillation (VMD)"], "posttreatment": ["GAC", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Surface water discharge|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter"], "desalination": ["BWRO", "LSRRO"], "posttreatment": ["GAC", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Surface water discharge|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter"], "desalination": ["BWRO"], "posttreatment": ["GAC", "Chlorination"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Agricultural use|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["BWRO", "MVC"], "posttreatment": ["Selective ED", "Blending / salinity adjustment", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Agricultural use|Vacuum membrane distillation (VMD)": {"pretreatment": ["Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["BWRO", "Vacuum membrane distillation (VMD)"], "posttreatment": ["Selective ED", "Blending / salinity adjustment", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Agricultural use|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["BWRO", "LSRRO"], "posttreatment": ["Selective ED", "Blending / salinity adjustment", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Agricultural use|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["BWRO"], "posttreatment": ["Selective ED", "Blending / salinity adjustment", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Drinking water quality oriented(e.g. groundwater recharge)|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Well pumping", "Raw water storage", "Cartridge filter"], "desalination": ["BWRO", "MVC"], "posttreatment": ["ZIX-Zak IX"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Drinking water quality oriented(e.g. groundwater recharge)|Vacuum membrane distillation (VMD)": {"pretreatment": ["Well pumping", "Raw water storage", "Cartridge filter"], "desalination": ["BWRO", "Vacuum membrane distillation (VMD)"], "posttreatment": ["ZIX-Zak IX"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Drinking water quality oriented(e.g. groundwater recharge)|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Well pumping", "Raw water storage", "Cartridge filter"], "desalination": ["BWRO", "LSRRO"], "posttreatment": ["ZIX-Zak IX"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Drinking water quality oriented(e.g. groundwater recharge)|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Well pumping", "Raw water storage", "Cartridge filter"], "desalination": ["BWRO"], "posttreatment": ["ZIX-Zak IX"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Powerplant cooling water|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "MVC"], "posttreatment": ["Scale inhibitor dosing", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Powerplant cooling water|Vacuum membrane distillation (VMD)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "Vacuum membrane distillation (VMD)"], "posttreatment": ["Scale inhibitor dosing", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Powerplant cooling water|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "LSRRO"], "posttreatment": ["Scale inhibitor dosing", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Powerplant cooling water|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "BWRO"], "posttreatment": ["Scale inhibitor dosing", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Data center cooling water|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "MVC"], "posttreatment": ["Biocide dosing", "Fine filter", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Data center cooling water|Vacuum membrane distillation (VMD)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "Vacuum membrane distillation (VMD)"], "posttreatment": ["Biocide dosing", "Fine filter", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Data center cooling water|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "LSRRO"], "posttreatment": ["Biocide dosing", "Fine filter", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Data center cooling water|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Well pumping", "Media filtration", "Cartridge filter", "Antiscalant dosing"], "desalination": ["NF", "BWRO"], "posttreatment": ["Biocide dosing", "Fine filter", "pH adjustment"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Feedwater to UPW production|Mechanical Vapor Compression (MVC)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration"], "desalination": ["MVC", "MVC"], "posttreatment": ["GAC", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Feedwater to UPW production|Vacuum membrane distillation (VMD)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration"], "desalination": ["Vacuum membrane distillation (VMD)"], "posttreatment": ["GAC", "Zeolite", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Feedwater to UPW production|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration"], "desalination": ["LSRRO", "LSRRO"], "posttreatment": ["GAC", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Feedwater to UPW production|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["3-phase separator", "DAF", "Ultrafiltration"], "desalination": ["BWRO", "BWRO"], "posttreatment": ["GAC", "Ion exchange"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|On-site O&G hydraulic fracturing recirculation|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Well pumping", "Media filtration", "Bag filter"], "desalination": ["BWRO", "MVC"], "posttreatment": ["Adjust TDS", "Additives blending"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|On-site O&G hydraulic fracturing recirculation|Vacuum membrane distillation (VMD)": {"pretreatment": ["Well pumping", "Media filtration", "Bag filter"], "desalination": ["BWRO", "Vacuum membrane distillation (VMD)"], "posttreatment": ["Adjust TDS", "Additives blending"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|On-site O&G hydraulic fracturing recirculation|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Well pumping", "Media filtration", "Bag filter"], "desalination": ["BWRO", "LSRRO"], "posttreatment": ["Adjust TDS", "Additives blending"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|On-site O&G hydraulic fracturing recirculation|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Well pumping", "Media filtration", "Bag filter"], "desalination": ["BWRO"], "posttreatment": ["Adjust TDS", "Additives blending"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Brine valorization(In progress)|Mechanical Vapor Compression (MVC)": {"pretreatment": ["Well pumping", "Media filtration", "Chemical softening", "Antiscalant dosing"], "desalination": ["BWRO", "MVC"], "posttreatment": ["Selective ED", "Mineral precipitation / recovery"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Brine valorization(In progress)|Vacuum membrane distillation (VMD)": {"pretreatment": ["Well pumping", "Media filtration", "Chemical softening", "Antiscalant dosing"], "desalination": ["BWRO", "Vacuum membrane distillation (VMD)"], "posttreatment": ["Selective ED", "Mineral precipitation / recovery"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Brine valorization(In progress)|Low-salt rejection reverse osmosis (LSRRO)": {"pretreatment": ["Well pumping", "Media filtration", "Chemical softening", "Antiscalant dosing"], "desalination": ["BWRO", "LSRRO"], "posttreatment": ["Selective ED", "Mineral precipitation / recovery"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}, "Brackish groundwater|Brine valorization(In progress)|Brackish-water reverse osmosis (BWRO)": {"pretreatment": ["Well pumping", "Media filtration", "Chemical softening", "Antiscalant dosing"], "desalination": ["BWRO"], "posttreatment": ["Selective ED", "Mineral precipitation / recovery"], "brine": ["Saltwater disposal well"], "brine_category": "Brine disposal"}}, "note": "Snapshot of the TEA app configuration from November 02, 2026. Removal efficiencies are the removal-table defaults; scaling tendency (Reaktoro) is not calculated here."}}</script>
+<script>
+(function(){
+const P = JSON.parse(document.getElementById("payload").textContent);
+const U = P.units;
+const $ = id => document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const smooth=t=>t*t*(3-2*t);
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const esc = s => String(s).replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+const EDIT = ["pretreatment","desalination","posttreatment","brine"];
+const MAIN = ["pretreatment","desalination","posttreatment"];
+const STAGE_NAME = {pretreatment:"Pretreatment",desalination:"Desalination",posttreatment:"Posttreatment",brine:"Brine management"};
+
+/* ---------- constituents ---------- */
+const SPEC = {
+  "Oil":{tok:"--oil",shape:"circle",r:3.3}, "TSS":{tok:"--tss",shape:"square",r:2.9},
+  "Hardness":{tok:"--hard",shape:"diamond",r:3.1}, "TDS":{tok:"--tds",shape:"dot",r:1.7},
+  "Ammonia nitrogen":{tok:"--nh3",shape:"tri",r:3.3,short:"NH3-N"}, "TOC":{tok:"--toc",shape:"ring",r:3.0},
+  "Iron":{tok:"--fe",shape:"trid",r:3.3}, "BTEX":{tok:"--btex",shape:"plus",r:3.4}
+};
+const ANIM_DEFAULT=["Oil","TSS","Hardness","TDS","Ammonia nitrogen","TOC"], ANIM_OPTIONAL=["Iron","BTEX"];
+const CHART_PALETTE=["#5B8C9E","#9A6FB0","#6E8B3D","#B06A3B","#3D7AA8","#A84D6A","#7A7F2E","#4E6E58"];
+const shortName=p=>(SPEC[p]&&SPEC[p].short)||p;
+
+/* ---------- state ---------- */
+let keySeq=0, selKey=null, train={};
+const mkInst=u=>({key:"k"+(++keySeq), unit:u, edits:{}});
+function loadPageTrain(){
+  EDIT.forEach(s=>train[s]=(P.train[s]||[]).filter(u=>U[u]).map(mkInst)); selKey=null;
+  const ov=P.removal_overrides||{}; let seq=0;   // System Design numbers units 1..n across all stages
+  EDIT.forEach(s=>train[s].forEach(inst=>{ seq++; const v=ov[String(seq)]; if(v&&inst.unit!=="LSRRO"&&MAIN.includes(s)) Object.entries(v).forEach(([p,x])=>{ if(typeof x==="number") inst.edits[p]=clamp(x,0,1); }); }));
+}
+let animOn=new Set(ANIM_DEFAULT), chartExtra=[], custom={};
+let feed={}, feedPH=null;
+function setFeed(src,ph){ feed={}; Object.entries(src||{}).forEach(([k,v])=>{ if(v>0) feed[k]=v; }); Object.entries(custom).forEach(([k,c])=>feed[k]=c.feed); feedPH=ph; }
+setFeed(P.feed,P.feed_ph);
+let model=null;
+function mainList(){ const out=[]; MAIN.forEach(s=>train[s].forEach(i=>{ i.stage=s; out.push(i); })); return out; }
+function findInst(k){ for(const s of EDIT){ const i=train[s].find(x=>x.key===k); if(i) return {inst:i,stage:s}; } return null; }
+const unitOf=p=>P.params[p]||(custom[p]&&custom[p].unit)||"";
+
+/* ---------- removal model (tea_models.water_quality.get_default_removal_efficiencies) ---------- */
+function lsrroRemoval(p,x){
+  const R=P.lsrro.regression[p], A=P.lsrro.average[p];
+  if(R){ let v=R[0]+R[1]*x+R[2]*x*x; if(v<0&&A!=null) return {r:A,how:"Average removal (regression < 0)"}; v=Math.max(v,0); return {r:x>0?clamp(1-v/x,0,1):0,how:"Regression"}; }
+  if(A!=null) return {r:A,how:"Average removal"};
+  return {r:0,how:"Not modeled"};
+}
+function dafToc(fe){ const T=P.daf_toc; if(!T) return null; if(fe<=T[0][0]) return T[0][1]; for(let i=1;i<T.length;i++){ if(fe<=T[i][0]){ const [x0,y0]=T[i-1],[x1,y1]=T[i]; return y0+(y1-y0)*(fe-x0)/(x1-x0); } } return T[T.length-1][1]; }
+function rateFor(inst,p,cin){
+  if(inst.edits[p]!=null) return {r:inst.edits[p],how:"Edited"};
+  if(inst.unit==="LSRRO") return lsrroRemoval(p,cin[p]||0);
+  if(inst.unit==="DAF"&&p==="TOC"){ const r=dafToc(cin.Iron||0); if(r!=null) return {r,how:"DAF model"}; }
+  const rm=U[inst.unit].removals[p];
+  if(!rm||rm.default==null) return {r:0,how:rm?"Not modeled":"No removal"};
+  return {r:rm.default,how:"Default"};
+}
+function simulate(list){
+  const params=Object.keys(feed), C=[Object.assign({},feed)], Q=[1], PH=[feedPH], R=[], RES=[];
+  list.forEach((inst,i)=>{ const u=U[inst.unit], cin=C[i], cout={}, rr={}, res={}, qout=Q[i]*clamp(u.recovery,0,1);
+    for(const p of params){ const x=rateFor(inst,p,cin); rr[p]=x; cout[p]=(cin[p]||0)*(1-x.r); res[p]=Math.max(0,Q[i]*(cin[p]||0)-qout*cout[p]); }
+    C.push(cout); Q.push(qout); R.push(rr); RES.push(res); PH.push(u.ph_target!=null?u.ph_target:PH[i]); });
+  return {list,C,Q,R,RES,PH};
+}
+function compute(){
+  const {list,C,Q,R,RES,PH}=simulate(mainList());
+  const params=Object.keys(feed);
+  const fate={};
+  for(const p of params){ const m0=feed[p]; let b=0,o=0; list.forEach((inst,i)=>{ const v=RES[i][p]/m0; U[inst.unit].path==="brine"?b+=v:o+=v; }); fate[p]={product:Q[list.length]*C[list.length][p]/m0,brine:b,solid:o}; }
+  model={list,C,Q,R,RES,PH,fate};
+}
+
+/* ---------- context ---------- */
+/* Standalone mode: a snapshot of the app configuration with scenario selectors instead of the page state. */
+let SC=P.standalone?Object.assign({},P.standalone.start):null;
+function loadScenario(){
+  const A=P.standalone, lv=A.feeds[SC.water]||{}; if(!lv[SC.level]) SC.level=Object.keys(lv)[0];
+  const f=lv[SC.level]||{}; setFeed(f.feed,f.ph);
+  P.targets=A.targets[SC.ffp]||{};
+  const t=A.default_trains[`${SC.water}|${SC.ffp}|${SC.desal}`]||{}; P.train=t; P.brine_category=t.brine_category||"";
+  P.scenario={influent:SC.water,conc_level:SC.level,ffp:SC.ffp,desal:SC.desal};
+  loadPageTrain();
+}
+function renderCtx(){
+  if(P.standalone){
+    const A=P.standalone, opt=(id,label,list,val)=>`<label class="sel" for="${id}"><span>${label}</span><select id="${id}">${list.map(o=>`<option${o===val?" selected":""}>${esc(o)}</option>`).join("")}</select></label>`;
+    $("ctx").innerHTML=opt("scWater","Water type",Object.keys(A.feeds),SC.water)+opt("scLevel","Concentration level",Object.keys(A.feeds[SC.water]||{}),SC.level)
+      +opt("scFfp","Fit-for-Purpose",A.ffps,SC.ffp)+opt("scDesal","Primary desalination",A.desal_types,SC.desal)+`<button class="btn small" id="resetTrain" type="button">Reset to default train</button>`;
+    const on=(id,key)=>$(id).onchange=e=>{ SC[key]=e.target.value; loadScenario(); renderCtx(); rebuild(); };
+    on("scWater","water"); on("scLevel","level"); on("scFfp","ffp"); on("scDesal","desal");
+    $("resetTrain").onclick=()=>{ loadScenario(); rebuild(); };
+    $("brineCat").textContent=P.brine_category||""; return;
+  }
+  const s=P.scenario||{};
+  $("ctx").innerHTML=[["Water type",s.influent],["Concentration level",s.conc_level],["Fit-for-Purpose",s.ffp],["Primary desalination",s.desal]]
+    .filter(x=>x[1]).map(([k,v])=>`<div class="item"><span>${k}</span>${esc(v)}</div>`).join("")+`<button class="btn small" id="resetTrain" type="button">Reset to page train</button>`;
+  $("resetTrain").onclick=()=>{ loadPageTrain(); rebuild(); };
+  $("brineCat").textContent=P.brine_category||"";
+}
+
+/* ---------- library ---------- */
+function chipHTML(name,attrs){
+  return `<div class="chip" role="button" tabindex="0" ${attrs} title="${esc(name)}">${esc(U[name].label)}</div>`;
+}
+function renderLib(){
+  $("libgroups").innerHTML=EDIT.map(s=>{ const names=P.library[s]||[]; if(!names.length) return "";
+    return `<div class="libgrp"><div class="label">${STAGE_NAME[s]}</div><div class="chips">${names.map(n=>chipHTML(n,`data-src="lib" data-unit="${esc(n)}" data-from="${s}"`)).join("")}</div></div>`; }).join("");
+}
+
+/* ---------- lanes ---------- */
+const laneEl=s=>document.querySelector(`.lane[data-stage="${s}"]`);
+function renderLanes(){
+  for(const s of EDIT){
+    const strip=laneEl(s).querySelector(".strip"), hide=drag&&drag.active&&drag.src==="lane"?drag.key:null;
+    const list=train[s].filter(i=>i.key!==hide), slot=drag&&drag.active&&drag.over===s&&drag.ok?drag.idx:null;
+    let h="";
+    list.forEach((inst,i)=>{ if(slot===i) h+='<span class="slot"></span>';
+      const u=U[inst.unit], edited=Object.keys(inst.edits).length>0, idx=MAIN.includes(s)&&model?model.list.indexOf(inst)+1:0;
+      h+=`<div class="chip lchip${inst.key===selKey?" sel":""}${u.has_model?"":" generic"}" role="button" tabindex="0" data-src="lane" data-key="${inst.key}" title="${esc(inst.unit)}">${idx?`<span class="n">${idx}</span>`:""}${esc(u.label)}${u.has_model?"":'<span class="t">generic model</span>'}${edited?'<span class="ed" title="Removal edited"></span>':""}<button class="x" type="button" data-rm="${inst.key}" aria-label="Remove ${esc(u.label)}">×</button></div>`; });
+    if(slot!==null&&slot>=list.length) h+='<span class="slot"></span>';
+    if(!list.length&&slot===null) h+=`<span class="empty">${s==="brine"?"No brine management unit":"Drag units here"}</span>`;
+    strip.innerHTML=h;
+  }
+  const res=model?model.list.filter(i=>U[i.unit].path==="solid"&&U[i.unit].residual):[];
+  $("solidStrip").innerHTML=res.length?res.map(i=>`<span class="rchip">${esc(U[i.unit].residual)}<span>${esc(U[i.unit].label)}</span></span>`).join(""):'<span class="empty">No sludge or solid residuals in this train</span>';
+}
+
+/* ---------- drag ---------- */
+let drag=null, ghost=null;
+function flash(t){ $("msg").textContent=t; clearTimeout(flash.h); flash.h=setTimeout(()=>$("msg").textContent="",3500); }
+function laneAt(x,y){ for(const s of EDIT){ const r=laneEl(s).getBoundingClientRect(); if(x>=r.left-6&&x<=r.right+6&&y>=r.top-6&&y<=r.bottom+6) return s; } return null; }
+function insertionIndex(s,x,y){ let n=0; for(const c of laneEl(s).querySelectorAll(".lchip")){ const r=c.getBoundingClientRect(), cy=r.top+r.height/2, cx=r.left+r.width/2; if(cy<y-r.height/2) n++; else if(Math.abs(cy-y)<=r.height/2&&cx<x) n++; } return n; }
+function onDown(e){
+  if(e.button!==0) return; const chip=e.target.closest(".chip"); if(!chip||e.target.closest(".x")) return;
+  const f=chip.dataset.src==="lane"?findInst(chip.dataset.key):null;
+  drag={chip,src:chip.dataset.src,unit:f?f.inst.unit:chip.dataset.unit,key:chip.dataset.key,from:chip.dataset.from,x0:e.clientX,y0:e.clientY,active:false,over:null,ok:false,idx:null};
+  document.addEventListener("pointermove",onMove); document.addEventListener("pointerup",onUp); document.addEventListener("pointercancel",onCancel);
+}
+function onMove(e){
+  if(!drag) return;
+  if(!drag.active){ if(Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)<5) return;
+    drag.active=true; const r=drag.chip.getBoundingClientRect();
+    ghost=drag.chip.cloneNode(true); ghost.classList.add("ghost"); ghost.classList.remove("sel"); ghost.style.width=r.width+"px";
+    const m=document.createElement("span"); m.className="gmsg"; ghost.appendChild(m);
+    drag.dx=drag.x0-r.left; drag.dy=drag.y0-r.top; document.body.appendChild(ghost);
+    const al=P.allowed[drag.unit]||[]; EDIT.forEach(s=>laneEl(s).classList.add(al.includes(s)?"ok":"no")); renderLanes(); }
+  e.preventDefault();
+  ghost.style.left=(e.clientX-drag.dx)+"px"; ghost.style.top=(e.clientY-drag.dy)+"px";
+  const s=laneAt(e.clientX,e.clientY), ok=!!s&&(P.allowed[drag.unit]||[]).includes(s), idx=ok?insertionIndex(s,e.clientX,e.clientY):null;
+  EDIT.forEach(t=>{ laneEl(t).classList.toggle("over",t===s&&ok); laneEl(t).classList.toggle("nohover",t===s&&!ok); });
+  ghost.querySelector(".gmsg").textContent=s&&!ok?`Not allowed in ${STAGE_NAME[s]}`:(!s&&drag.src==="lane"?"Release to remove":"");
+  if(s!==drag.over||ok!==drag.ok||idx!==drag.idx){ drag.over=s; drag.ok=ok; drag.idx=idx; renderLanes(); }
+}
+function finish(){ document.removeEventListener("pointermove",onMove); document.removeEventListener("pointerup",onUp); document.removeEventListener("pointercancel",onCancel);
+  if(ghost){ ghost.remove(); ghost=null; } EDIT.forEach(s=>laneEl(s).classList.remove("ok","no","over","nohover")); }
+function homeStage(unit,from){ const al=P.allowed[unit]||[]; return al.includes(from)?from:al[0]; }
+function onUp(){
+  const d=drag; finish(); drag=null; if(!d) return;
+  if(!d.active){ if(d.src==="lib"){ const i=mkInst(d.unit); train[homeStage(d.unit,d.from)].push(i); selKey=i.key; rebuild(); } else { selKey=d.key; rebuild(); } return; }
+  if(d.over&&!d.ok){ flash(`${d.unit} cannot be placed in ${STAGE_NAME[d.over]}. Allowed: ${(P.allowed[d.unit]||[]).map(s=>STAGE_NAME[s]).join(", ")}.`); renderLanes(); return; }
+  if(d.src==="lib"){ if(d.ok){ const i=mkInst(d.unit); train[d.over].splice(d.idx,0,i); selKey=i.key; rebuild(); } else renderLanes(); return; }
+  const f=findInst(d.key); if(!f){ renderLanes(); return; }
+  train[f.stage]=train[f.stage].filter(i=>i.key!==d.key);
+  if(d.ok){ train[d.over].splice(d.idx,0,f.inst); selKey=d.key; } else if(selKey===d.key) selKey=null;
+  rebuild();
+}
+function onCancel(){ finish(); drag=null; renderLanes(); }
+$("libgroups").addEventListener("pointerdown",onDown);
+document.querySelector(".lanes").addEventListener("pointerdown",onDown);
+document.querySelector(".lanes").addEventListener("click",e=>{ const b=e.target.closest(".x"); if(!b) return; const f=findInst(b.dataset.rm); if(f){ train[f.stage]=train[f.stage].filter(i=>i.key!==b.dataset.rm); if(selKey===b.dataset.rm) selKey=null; rebuild(); } });
+$("libgroups").addEventListener("keydown",e=>{ const c=e.target.closest(".chip"); if(!c) return; if(e.key==="Enter"||e.key===" "){ e.preventDefault(); const i=mkInst(c.dataset.unit); train[homeStage(c.dataset.unit,c.dataset.from)].push(i); selKey=i.key; rebuild(); } });
+document.querySelector(".lanes").addEventListener("keydown",e=>{
+  const c=e.target.closest(".lchip"); if(!c||e.target.closest(".x")) return; const f=findInst(c.dataset.key); if(!f) return; const arr=train[f.stage], i=arr.indexOf(f.inst);
+  if(e.shiftKey&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){ e.preventDefault(); const j=clamp(i+(e.key==="ArrowLeft"?-1:1),0,arr.length-1); if(j!==i){ arr.splice(i,1); arr.splice(j,0,f.inst); rebuild(); refocus(f.inst.key); } }
+  else if(e.key==="Delete"||e.key==="Backspace"){ e.preventDefault(); const nx=arr[i+1]||arr[i-1]; arr.splice(i,1); if(selKey===f.inst.key) selKey=null; rebuild(); if(nx) refocus(nx.key); }
+  else if(e.key==="Enter"||e.key===" "){ e.preventDefault(); selKey=f.inst.key; rebuild(); refocus(f.inst.key); } });
+function refocus(k){ const el=document.querySelector(`.lchip[data-key="${k}"]`); if(el) el.focus(); }
+
+/* ---------- constituent bar ---------- */
+const chartColorMap={};
+function colorOf(p){ if(SPEC[p]) return colors[SPEC[p].tok]; if(!chartColorMap[p]) chartColorMap[p]=CHART_PALETTE[Object.keys(chartColorMap).length%CHART_PALETTE.length]; return chartColorMap[p]; }
+const swatch=p=>SPEC[p]?`var(${SPEC[p].tok})`:colorOf(p);
+function icon(p){ // same marker as the particle in the flow schematic; chart-only constituents get a line
+  const c=SPEC[p]?colors[SPEC[p].tok]:colorOf(p), sh=SPEC[p]?SPEC[p].shape:"line";
+  const body={square:`<rect x="2" y="2" width="8" height="8" fill="${c}"/>`, diamond:`<path d="M6 0.5 L10.5 6 L6 11.5 L1.5 6Z" fill="${c}"/>`,
+    tri:`<path d="M6 1 L11 10.5 L1 10.5Z" fill="${c}"/>`, trid:`<path d="M6 11 L11 1.5 L1 1.5Z" fill="${c}"/>`,
+    ring:`<circle cx="6" cy="6" r="4" fill="none" stroke="${c}" stroke-width="1.8"/>`, plus:`<path d="M1.5 6H10.5M6 1.5V10.5" stroke="${c}" stroke-width="2"/>`,
+    dot:`<circle cx="6" cy="6" r="2.4" fill="${c}"/>`, line:`<path d="M0.5 6H11.5" stroke="${c}" stroke-width="2.4"/>`}[sh]||`<circle cx="6" cy="6" r="4.2" fill="${c}"/>`;
+  return `<svg class="ic" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">${body}</svg>`;
+}
+function chartSpecies(){ const out=[...ANIM_DEFAULT,...ANIM_OPTIONAL].filter(p=>animOn.has(p)&&feed[p]); chartExtra.forEach(p=>{ if(feed[p]&&!out.includes(p)) out.push(p); }); return out; }
+function renderSpecies(){
+  $("spAnim").innerHTML=[...ANIM_DEFAULT,...ANIM_OPTIONAL].map(p=>{ const has=!!feed[p], on=animOn.has(p)&&has;
+    return `<button class="sp" type="button" data-sp="${esc(p)}" aria-pressed="${on}" ${has?"":"disabled title=\"Not in the feed water quality\""}>${icon(p)}${esc(shortName(p))}</button>`; }).join("");
+  $("spAnim").innerHTML+=chartExtra.map(p=>`<button class="sp" type="button" data-rmchart="${esc(p)}" aria-pressed="true" title="Chart only · click to remove">${icon(p)}${esc(p)} ×</button>`).join("");
+  const opts=Object.keys(feed).filter(p=>!SPEC[p]&&!chartExtra.includes(p)).sort();
+  $("addParam").innerHTML=opts.map(p=>`<option>${esc(p)}</option>`).join(""); $("addParamBtn").disabled=!opts.length;
+}
+$("spAnim").addEventListener("click",e=>{ const b=e.target.closest("[data-sp]"); if(!b||b.disabled) return; const p=b.dataset.sp; animOn.has(p)?animOn.delete(p):animOn.add(p); rebuild(true); });
+$("spAnim").addEventListener("click",e=>{ const b=e.target.closest("[data-rmchart]"); if(!b) return; chartExtra=chartExtra.filter(p=>p!==b.dataset.rmchart); rebuild(true); });
+$("addParamBtn").onclick=()=>{ const p=$("addParam").value; if(p&&!chartExtra.includes(p)){ chartExtra.push(p); rebuild(true); } };
+$("addCustomBtn").onclick=()=>{ $("customRow").hidden=!$("customRow").hidden; if(!$("customRow").hidden) $("cName").focus(); };
+$("cAdd").onclick=()=>{ const n=$("cName").value.trim(), f=parseFloat($("cFeed").value);
+  if(!n){ flash("Enter a name for the new constituent."); return; } if(!(f>0)){ flash("Feed concentration must be a positive number."); return; }
+  if(feed[n]&&!custom[n]){ flash(`${n} is already in the feed water quality; add it from the list.`); return; }
+  custom[n]={feed:f,unit:$("cUnit").value.trim()||"mg/L"}; feed[n]=f; if(!chartExtra.includes(n)) chartExtra.push(n);
+  $("cName").value=""; $("cFeed").value=""; $("customRow").hidden=true; rebuild(true); };
+
+/* ---------- number formats ---------- */
+function pct(r,d){ if(r==null) return "–"; const v=r*100; if(d!=null) return v.toFixed(d)+"%"; return (v>=99.9&&v<100?v.toFixed(3):v>=99?v.toFixed(2):v.toFixed(1))+"%"; }
+function fmt(v){ if(v==null||isNaN(v)) return "–"; if(v>=1000) return Math.round(v).toLocaleString("en-US"); if(v>=10) return v.toFixed(0); if(v>=1) return v.toFixed(1); if(v>=0.01) return v.toFixed(2); if(v>=0.0001) return v.toFixed(4); return v>0?v.toExponential(1):"0"; }
+
+/* ---------- unit details ---------- */
+function renderDetail(){
+  const el=$("detail"), f=selKey&&findInst(selKey);
+  if(!f){ el.innerHTML=`<div class="label">Unit details</div><h3>Select a unit</h3><p class="note">Click a unit in the stages above or in the schematic to see its removal efficiencies, the value in the app's removal table and its range, and to adjust them for this exploration.</p>`; return; }
+  const {inst,stage}=f, u=U[inst.unit], main=MAIN.includes(stage), i=model.list.indexOf(inst);
+  let h=`<div class="label">Unit details · ${STAGE_NAME[stage]}</div><h3>${esc(inst.unit)}</h3>
+   <div class="meta"><span>Default recovery ${pct(u.recovery,1)}</span>${main&&u.residual?`<span>Reject stream: ${esc(u.residual)} → ${u.path==="brine"?"Brine management":"Sludge / solid waste"}</span>`:""}${u.ph_target!=null?`<span>pH target ${u.ph_target}</span>`:""}</div>`;
+  if(!u.has_model) h+=`<p class="unote">This unit has no dedicated technical model and runs on the generic unit template.</p>`;
+  if(u.note) h+=`<p class="unote">${esc(u.note)}</p>`;
+  if(!main){ h+=`<p class="note">Brine management units receive the brine and concentrate streams. They are not part of the product water calculation.</p>`; el.innerHTML=h; return; }
+  if(!u.has_data) h+=`<p class="note">No removal efficiencies in UNIT_REMOVAL_RATES; no removal is assumed.</p>`;
+  const ro=inst.unit==="LSRRO", dis=ro?" disabled":"";
+  if(ro) h+=`<p class="unote">LSRRO removals are calculated by the LSRRO model and cannot be edited, the same as on System Design.</p>`;
+  const cs=chartSpecies(), rows=[...new Set([...cs,...Object.keys(u.removals).filter(p=>feed[p])])];
+  h+=`<div class="tablewrap"><table class="rtable"><thead><tr><th>Constituent</th><th>Removal table</th><th>Removal efficiency</th><th>Inlet → outlet</th></tr></thead><tbody>`;
+  for(const p of rows){
+    const rm=u.removals[p], cur=model.R[i][p], lo=rm&&rm.low!=null?rm.low:null, hi=rm&&rm.high!=null?rm.high:null, val=cur?cur.r:0, edited=inst.edits[p]!=null;
+    const out=edited&&lo!=null&&(val<lo-1e-9||val>hi+1e-9);
+    const band=lo!=null?`background:linear-gradient(to right,transparent ${lo*100}%,var(--accent-soft) ${lo*100}%,var(--accent-soft) ${hi*100}%,transparent ${hi*100}%)`:"";
+    h+=`<tr><td class="p">${icon(p)}${esc(shortName(p))}</td><td class="raw">${rm?esc(rm.raw):"—"}</td>
+      <td><div class="ctl"><input type="range" min="0" max="100" step="0.1" value="${(val*100).toFixed(1)}" data-edit="${esc(p)}" aria-label="${esc(p)} removal efficiency" style="${band}"${dis}>
+      <input type="number" min="0" max="100" step="any" value="${+(val*100).toFixed(3)}" data-editn="${esc(p)}" aria-label="${esc(p)} removal efficiency, percent"${dis}>${edited?`<button class="btn small" type="button" data-reset="${esc(p)}">Reset</button>`:""}</div>
+      <div>${out?'<span class="oor">Outside range</span>':""} <span class="hint">${esc(cur?cur.how:"")}</span></div></td>
+      <td class="raw">${fmt(model.C[i][p])} → ${fmt(model.C[i+1][p])} ${esc(unitOf(p))}</td></tr>`;
+  }
+  h+=`</tbody></table></div>`;
+  if(Object.keys(inst.edits).length) h+=`<div><button class="btn small" type="button" data-resetall="1">Reset all to default</button> <span class="hint">Use Apply to Treatment Train to send edits to System Design.</span></div>`;
+  el.innerHTML=h;
+}
+$("detail").addEventListener("input",e=>{ const r=e.target.closest("[data-edit]"); if(!r) return; const f=findInst(selKey); if(!f) return;
+  f.inst.edits[r.dataset.edit]=clamp(+r.value/100,0,1); const n=r.parentElement.querySelector("[data-editn]"); if(n) n.value=r.value; compute(); renderSide(); });
+$("detail").addEventListener("change",e=>{ if(e.target.closest("[data-edit]")){ renderDetail(); renderLanes(); return; }
+  const n=e.target.closest("[data-editn]"); const f=findInst(selKey); if(n&&f){ const v=parseFloat(n.value); if(!isNaN(v)){ f.inst.edits[n.dataset.editn]=clamp(v/100,0,1); rebuild(true); } } });
+$("detail").addEventListener("click",e=>{ const f=findInst(selKey); if(!f) return; const r=e.target.closest("[data-reset]"); if(r){ delete f.inst.edits[r.dataset.reset]; rebuild(true); } if(e.target.closest("[data-resetall]")){ f.inst.edits={}; rebuild(true); } });
+
+/* ---------- warnings ---------- */
+function ruleHit(rule,c){ const v=c[rule.param]; const present=v!=null&&v>0;
+  if(rule.test==="missing") return feed[rule.param]==null||!present ? {v:0} : null;
+  if(!present) return null;
+  if(rule.test==="gt") return v>rule.value?{v}:null;
+  if(rule.test==="outside") return (v<rule.range[0]||v>rule.range[1])?{v}:null; return null; }
+function sameAsOpened(){ const cur=model.list.map(i=>i.unit), op=P.scaling.train||[]; return cur.length===op.length&&cur.every((u,i)=>u===op[i])&&model.list.every(i=>!Object.keys(i.edits).length); }
+function mineralText(m){ return `${esc(m.mineral)} (Ω=${m.omega!=null?(+m.omega).toPrecision(3):"–"}, SI=${m.si!=null?(+m.si).toFixed(2):"–"})`; }
+function renderWarnings(){
+  const W=[], L=model.list, n=L.length;
+  // Fit-for-Purpose targets (same comparison as Potential water quality gaps on page 02)
+  let gaps=0;
+  for(const [p,t] of Object.entries(P.targets||{})){
+    if(p==="pH"){ const ph=model.PH[n]; if(ph!=null&&t.range&&(ph<t.range[0]||ph>t.range[1])){ gaps++; W.push(["bad","May exceed target",`<b>pH</b> estimated product ${ph}, target ${t.range[0]}–${t.range[1]}`]); } continue; }
+    if(feed[p]==null) continue; const v=model.C[n][p];
+    if(t.limit!=null&&v>t.limit){ gaps++; W.push(["bad","May exceed target",`<b>${esc(p)}</b> estimated product ${fmt(v)} ${esc(t.unit||"")}, target ${fmt(t.limit)}`]); }
+    if(t.range&&(v<t.range[0]||v>t.range[1])){ gaps++; W.push(["bad","May exceed target",`<b>${esc(p)}</b> estimated product ${fmt(v)} ${esc(t.unit||"")}, target ${t.range[0]}–${t.range[1]}`]); }
+  }
+  if(!gaps) W.push(["ok","Targets","No target exceedances estimated for the listed fit-for-purpose requirements."]);
+  // Scaling tendency (Reaktoro), computed for the train as opened
+  if(P.standalone){ /* no Reaktoro in the standalone page */ }
+  else if(sameAsOpened()){
+    for(const row of P.scaling.rows||[]){ const tag=`<b>${row.position}. ${esc(U[row.unit]?U[row.unit].label:row.unit)}</b> concentrate (recovery ${pct(row.recovery,0)})`;
+      if(row.error) W.push(["info","Scaling",`${tag}: scaling check unavailable (${esc(row.error)}).`]);
+      else if(row.likely.length) W.push(["warn","Scaling",`${tag}: scaling likely for ${row.likely.map(mineralText).join(", ")}.`+(row.near.length?` Near saturation: ${row.near.map(mineralText).join(", ")}.`:""),"tea_models/scaling_tendency.py (Reaktoro, Pitzer, 25 °C)"]);
+      else if(row.near.length) W.push(["info","Scaling",`${tag}: near saturation for ${row.near.map(mineralText).join(", ")}.`,"tea_models/scaling_tendency.py (Reaktoro, Pitzer, 25 °C)"]);
+      else W.push(["ok","Scaling",`${tag}: no scaling expected.`,"tea_models/scaling_tendency.py (Reaktoro, Pitzer, 25 °C)"]); }
+  } else if((P.scaling.rows||[]).length || L.some(i=>i.stage==="desalination")) {
+    W.push(["info","Scaling","Scaling tendency is checked with Reaktoro for the train as it was when the explorer opened. Apply changes on the Treatment Train page and reopen the explorer to check this train."]);
+  }
+  // Operational rules (model ranges and membrane feed guidelines)
+  L.forEach((inst,i)=>{ for(const rule of P.rules||[]){ if(!rule.units.includes(inst.unit)) continue; const hit=ruleHit(rule,model.C[i]); if(!hit) continue;
+    W.push(["warn",rule.kind,`<b>${i+1}. ${esc(U[inst.unit].label)}</b>: ${esc(rule.message.replace("{value}",fmt(hit.v)))}`,rule.source]); } });
+  // Waste disposal
+  const brineUsed=L.some(i=>U[i.unit].path==="brine"&&U[i.unit].recovery<1);
+  if(brineUsed&&!train.brine.length) W.push(["warn","Waste disposal","Units in this train send brine or concentrate to brine management, but no brine management unit is selected."]);
+  // Generic units and edits
+  L.forEach((inst,i)=>{ const u=U[inst.unit];
+    if(!u.has_model) W.push(["info","Model",`<b>${i+1}. ${esc(u.label)}</b> runs on the generic unit template (no dedicated technical model).`]);
+    for(const [p,v] of Object.entries(inst.edits)){ const rm=u.removals[p]; if(rm&&rm.low!=null&&(v<rm.low-1e-9||v>rm.high+1e-9)&&!(P.literature||[]).some(l=>l.unit===inst.unit&&l.param===p&&Math.abs(l.value-v)<1e-9)) W.push(["warn","Edited removal",`<b>${i+1}. ${esc(u.label)}</b> ${esc(p)} removal set to ${pct(v)}, outside the removal-table value ${esc(rm.raw)}.`]); } });
+  if(!train.desalination.length) W.push(["info","Train","The desalination stage is empty."]);
+  const S=buildSuggestions();
+  $("warns").innerHTML=W.map(([c,k,t,src])=>`<div class="w ${c}"><span class="k">${esc(k)}</span><span>${t}</span>${src?`<span class="src">Source: ${esc(src)}</span>`:""}</div>`).join("")
+    +S.map((s,i)=>`<div class="w sug"><span class="k">Suggestion</span><span>${s.text}</span>${s.actions&&s.actions.length?`<span class="act">${s.actions.map((a,j)=>`<button class="btn small" type="button" data-sug="${i}:${j}">${esc(a.label)}</button>`).join("")}</span>`:""}${s.src?`<span class="src">Basis: ${esc(s.src)}</span>`:""}</div>`).join("");
+  SUGGESTIONS=S;
+}
+
+/* ---------- suggestions (computed from the app's removal table) ---------- */
+let SUGGESTIONS=[];
+const virt=(unit,stage)=>({unit,edits:{},stage,virtual:true});
+function withInsert(unit,stage){ const out=[]; MAIN.forEach(s=>{ train[s].forEach(i=>out.push(i)); if(s===stage) out.push(virt(unit,s)); }); return out; }
+function withEdits(map){ return mainList().map(i=>map.has(i)?{unit:i.unit,stage:i.stage,edits:Object.assign({},i.edits,map.get(i))}:i); }
+const productOf=(list,p)=>{ const m=simulate(list); return m.C[m.list.length][p]; };
+function addCandidates(test,stages){ // library units that pass test(list) when appended to a stage
+  const out=[];
+  for(const s of stages) for(const unit of (P.library[s]||[])){ const r=test(withInsert(unit,s)); if(r!=null) out.push({unit,stage:s,val:r}); }
+  out.sort((a,b)=>a.val-b.val); const seen=new Set(); return out.filter(c=>!seen.has(c.unit)&&seen.add(c.unit));
+}
+function buildSuggestions(){
+  const S=[], L=model.list, n=L.length;
+  // 1. Fit-for-Purpose gaps: raise removal within the table range, or add a unit
+  for(const [p,t] of Object.entries(P.targets||{})){
+    if(t.limit==null||feed[p]==null||!(model.C[n][p]>t.limit)) continue;
+    const lim=t.limit, u=unitOf(p);
+    const rangeUnits=L.filter(i=>i.unit!=="LSRRO"&&i.edits[p]==null&&U[i.unit].removals[p]&&U[i.unit].removals[p].high!=null&&U[i.unit].removals[p].high>(U[i.unit].removals[p].default||0)+1e-9);
+    const single=rangeUnits.map(i=>({i,val:productOf(withEdits(new Map([[i,{[p]:U[i.unit].removals[p].high}]])),p)})).filter(x=>x.val<=lim).sort((a,b)=>a.val-b.val);
+    if(single.length){ const x=single[0], rm=U[x.i.unit].removals[p];
+      S.push({text:`<b>${esc(p)}</b>: raising the removal in <b>${esc(U[x.i.unit].label)}</b> to ${pct(rm.high,1)}, the upper end of its removal-table range (${esc(rm.raw)}), brings the product to ${fmt(x.val)} ${esc(u)} (target ${fmt(lim)}).`,
+        actions:[{label:`Set ${U[x.i.unit].label} ${shortName(p)} to ${pct(rm.high,1)}`,run:()=>{ x.i.edits[p]=rm.high; }}],src:"UNIT_REMOVAL_RATES range"}); }
+    else if(rangeUnits.length){ const map=new Map(rangeUnits.map(i=>[i,{[p]:U[i.unit].removals[p].high}])), v=productOf(withEdits(map),p);
+      if(v<=lim) S.push({text:`<b>${esc(p)}</b>: raising the removal to the upper end of the removal-table range in ${rangeUnits.map(i=>`<b>${esc(U[i.unit].label)}</b>`).join(" and ")} brings the product to ${fmt(v)} ${esc(u)} (target ${fmt(lim)}).`,
+        actions:[{label:"Set all to upper end",run:()=>{ rangeUnits.forEach(i=>{ i.edits[p]=U[i.unit].removals[p].high; }); }}],src:"UNIT_REMOVAL_RATES range"});
+      else S.push({text:`<b>${esc(p)}</b>: even at the upper end of the removal-table ranges in the current units, the product stays near ${fmt(v)} ${esc(u)} (target ${fmt(lim)}); it needs a higher removal in another unit or an additional unit.`,src:"UNIT_REMOVAL_RATES range"}); }
+    for(const lit of (P.literature||[]).filter(l=>l.param===p)){
+      const hits=L.filter(i=>i.unit===lit.unit&&i.edits[p]==null&&lit.value>((model.R[L.indexOf(i)][p]||{}).r||0)+1e-9); if(!hits.length) continue;
+      const v=productOf(withEdits(new Map(hits.map(i=>[i,{[p]:lit.value}]))),p), cur=(model.R[L.indexOf(hits[0])][p]||{}).r||0;
+      S.push({text:`<b>${esc(p)}</b>: <b>${esc(U[lit.unit].label)}</b> uses ${pct(cur,1)} from the removal table. ${esc(lit.note||"")} A literature value of ${pct(lit.value,0)} brings the product to ${fmt(v)} ${esc(u)} (target ${fmt(lim)})${v<=lim?"":", still above the target"}.`,
+        actions:[{label:`Set ${U[lit.unit].label} ${shortName(p)} to ${pct(lit.value,0)}`,run:()=>{ hits.forEach(i=>{ i.edits[p]=lit.value; }); }}],src:lit.source});
+    }
+    const adds=addCandidates(list=>{ const v=productOf(list,p); return v<=lim?v:null; },["posttreatment","pretreatment"]).slice(0,2);
+    if(adds.length) S.push({text:`<b>${esc(p)}</b>: adding ${adds.map(c=>`<b>${esc(U[c.unit].label)}</b> to ${STAGE_NAME[c.stage]} (product ≈ ${fmt(c.val)} ${esc(u)})`).join(" or ")} meets the target of ${fmt(lim)} with default removals.`,
+      actions:adds.map(c=>({label:`Add ${U[c.unit].label}`,run:()=>{ const i=mkInst(c.unit); train[c.stage].push(i); selKey=i.key; }})),src:"UNIT_REMOVAL_RATES defaults"});
+  }
+  // 2. RO feed guidelines: pretreatment that brings the RO inlet under the guideline
+  L.forEach((inst,i)=>{ for(const rule of P.rules||[]){ if(rule.kind!=="Membrane feed"||!rule.units.includes(inst.unit)) continue; const hit=ruleHit(rule,model.C[i]); if(!hit) continue;
+    if(inst.stage==="pretreatment") continue;
+    const adds=addCandidates(list=>{ const m=simulate(list), k=m.list.indexOf(inst); const v=m.C[k][rule.param]||0; return v<=rule.value?v:null; },["pretreatment"]).slice(0,2);
+    if(adds.length) S.push({text:`<b>${esc(rule.param)}</b> entering <b>${esc(U[inst.unit].label)}</b>: adding ${adds.map(c=>`<b>${esc(U[c.unit].label)}</b> (≈ ${fmt(c.val)})`).join(" or ")} to Pretreatment brings it under the ${fmt(rule.value)} guideline.`,
+      actions:adds.map(c=>({label:`Add ${U[c.unit].label}`,run:()=>{ const x=mkInst(c.unit); train.pretreatment.push(x); selKey=x.key; }})),src:"UNIT_REMOVAL_RATES defaults; RO vendor feed guideline"}); } });
+  // 3. Scale control upstream of desalination
+  const anti=Object.keys(U).find(u=>/antiscalant/i.test(u)&&(P.allowed[u]||[]).includes("pretreatment"));
+  L.forEach((inst,i)=>{ const u=U[inst.unit]; if(inst.stage!=="desalination"||!["membrane","thermal"].includes(u.mech)) return;
+    const upstream=L.slice(0,i).some(x=>/antiscalant|scale/i.test(x.unit));
+    const row=sameAsOpened()?(P.scaling.rows||[]).find(r=>r.position===i+1):null, minerals=row&&row.likely?row.likely.map(m=>m.mineral):[];
+    const soft=L.slice(0,i).some(x=>x.unit==="Chemical softening"), softU=U["Chemical softening"];
+    if(upstream&&!minerals.length) return;
+    let text=minerals.length?`Reaktoro predicts ${minerals.map(esc).join(", ")} scaling in the <b>${esc(u.label)}</b> concentrate.`:`No antiscalant is dosed upstream of <b>${esc(u.label)}</b>.`;
+    text+=` ${u.mech==="thermal"?"Evaporator":"Membrane"} feeds normally receive antiscalant dosing to control mineral scaling${!soft&&softU&&model.C[i].Hardness>0?`; Chemical softening (hardness ${esc((softU.removals.Hardness||{}).raw||"")} in the removal table) also lowers the hardness reaching it (${fmt(model.C[i].Hardness)} ${esc(unitOf("Hardness"))} now)`:""}. The effect of antiscalant on scaling is not modeled here.`;
+    const actions=[]; if(anti&&!upstream) actions.push({label:`Add ${U[anti].label}`,run:()=>{ const x=mkInst(anti); train.pretreatment.push(x); selKey=x.key; }});
+    if(!soft&&softU&&(P.allowed["Chemical softening"]||[]).includes("pretreatment")&&model.C[i].Hardness>0) actions.push({label:"Add Chemical softening",run:()=>{ const x=mkInst("Chemical softening"); train.pretreatment.push(x); selKey=x.key; }});
+    S.push({text,actions,src:minerals.length?"tea_models/scaling_tendency.py":""}); });
+  // 4. Edited removals outside the table range
+  const isLit=(unit,p,v)=>(P.literature||[]).some(l=>l.unit===unit&&l.param===p&&Math.abs(l.value-v)<1e-9);
+  L.forEach(inst=>{ const u=U[inst.unit]; for(const [p,v] of Object.entries(inst.edits)){ const rm=u.removals[p]; if(rm&&rm.low!=null&&(v<rm.low-1e-9||v>rm.high+1e-9)&&!isLit(inst.unit,p,v))
+    S.push({text:`<b>${esc(u.label)}</b> ${esc(p)} removal ${pct(v)} is outside the removal-table value ${esc(rm.raw)}; keep it within ${pct(rm.low,1)}–${pct(rm.high,1)} unless you have site data.`,
+      actions:[{label:"Reset to default",run:()=>{ delete inst.edits[p]; }}]}); } });
+  return S;
+}
+$("warns").addEventListener("click",e=>{ const b=e.target.closest("[data-sug]"); if(!b) return; const [i,j]=b.dataset.sug.split(":").map(Number); const a=SUGGESTIONS[i]&&SUGGESTIONS[i].actions[j]; if(a){ a.run(); rebuild(); } });
+
+/* ---------- fate & export ---------- */
+function renderFate(){
+  $("fate").innerHTML=chartSpecies().map(p=>{ const f=model.fate[p]; if(!f) return ""; const t=(f.product+f.brine+f.solid)||1, a=f.product/t*100, b=f.brine/t*100, o=f.solid/t*100;
+    return `<div class="frow"><span>${icon(p)}${esc(shortName(p))}</span>
+      <div class="fbar" title="Product ${a.toFixed(2)}% · Brine ${b.toFixed(1)}% · Sludge / solid waste ${o.toFixed(1)}%"><span style="width:${a}%;background:var(--product)"></span><span style="width:${b}%;background:var(--brine)"></span><span style="width:${o}%;background:var(--solid)"></span></div>
+      <span class="fnum">Product ${a>0&&a<0.01?"<0.01":a.toFixed(a<1?2:1)}% · Brine ${b.toFixed(0)}% · Sludge ${o.toFixed(0)}%</span></div>`; }).join("")||'<span class="hint">No constituents to show.</span>';
+}
+function buildConfig(){
+  const cfg={pretreatment:[],desalination:[],posttreatment:[],brine_category:P.brine_category,brine:train.brine.map(i=>i.unit),removal_overrides:[]};
+  MAIN.forEach(s=>cfg[s]=train[s].map(i=>i.unit));
+  mainList().forEach((inst,i)=>{ if(inst.unit==="LSRRO") return;
+    const vals=Object.fromEntries(Object.entries(inst.edits).filter(([k])=>P.feed[k]!=null).map(([k,v])=>[k,+v.toFixed(6)]));
+    if(Object.keys(vals).length) cfg.removal_overrides.push({position:i+1,stage:inst.stage,unit:inst.unit,removal_efficiencies:vals}); });
+  return cfg;
+}
+function renderExport(){
+  const cfg=buildConfig(), n=cfg.removal_overrides.length;
+  $("applySummary").textContent=`Replaces the train on the Treatment Train page (${model.list.length} units, ${cfg.brine.length} brine management) and the removal efficiencies on System Design (${n} unit${n===1?"":"s"} edited). TEA results are cleared and need to be recalculated.`+(Object.keys(custom).length?" New constituents are not in the feed water quality and are not applied.":"");
+}
+let applyArmed=false, applyTimer=null;
+$("applyBtn").onclick=()=>{
+  const b=$("applyBtn");
+  if(!applyArmed){ applyArmed=true; b.classList.add("confirm"); b.textContent="Click again to replace the page train"; clearTimeout(applyTimer);
+    applyTimer=setTimeout(()=>{ applyArmed=false; b.classList.remove("confirm"); b.textContent="Apply to Treatment Train"; },5000); return; }
+  clearTimeout(applyTimer); b.disabled=true; b.textContent="Applying…";
+  try{ window.parent.postMessage({type:"tea-train-explorer-apply",config:buildConfig()},"*"); $("applyMsg").textContent="Sent to the app. The dialog closes when the page updates."; }
+  catch(e){ b.disabled=false; b.textContent="Apply to Treatment Train"; $("applyMsg").textContent="Could not reach the app. Close the dialog and try again."; }
+  applyArmed=false; b.classList.remove("confirm");
+};
+
+/* ---------- colors ---------- */
+const colors={};
+["--surface","--fg","--muted","--f-display","--line","--grid","--accent","--bad","--water-clear","--water-murky","--brine","--solid","--band-pre","--band-desal","--band-post","--oil","--tss","--hard","--tds","--nh3","--toc","--fe","--btex","--vapor","--sludge","--f-mono","--f-body"]
+  .forEach(k=>colors[k]=getComputedStyle(document.documentElement).getPropertyValue(k).trim()||"#888888");
+function rgb(h){ h=h.replace("#",""); if(h.length===3) h=h.split("").map(c=>c+c).join(""); const n=parseInt(h,16); return [n>>16&255,n>>8&255,n&255]; }
+function rgba(h,a){ const A=rgb(h); return `rgba(${A[0]},${A[1]},${A[2]},${a})`; }
+function mix(a,b,t,al){ const A=rgb(a),B=rgb(b); const c=A.map((v,i)=>Math.round(v+(B[i]-v)*t)); return `rgba(${c[0]},${c[1]},${c[2]},${al==null?1:al})`; }
+
+/* ---------- shared geometry ---------- */
+const W=1200, FEEDZ=96, OUTZ=150, GAP=22;
+let G={units:[]};
+function layout(){
+  const n=model.list.length, area=W-FEEDZ-OUTZ, w=n?Math.min(168,(area-GAP*(n-1))/n):0, total=n?n*w+GAP*(n-1):0, start=FEEDZ+(area-total)/2;
+  G.units=model.list.map((inst,i)=>{ const x0=start+i*(w+GAP); return {inst,u:U[inst.unit],i,x0,x1:x0+w,w,mx:x0+w*0.58}; });
+  G.start=n?G.units[0].x0:FEEDZ; G.end=n?G.units[n-1].x1:W-OUTZ;
+}
+function stageBands(c,y0,y1){ const tok={pretreatment:"--band-pre",desalination:"--band-desal",posttreatment:"--band-post"};
+  for(const s of MAIN){ const us=G.units.filter(g=>g.inst.stage===s); if(!us.length) continue; const a=us[0].x0-GAP/2+2, b=us[us.length-1].x1+GAP/2-2; c.fillStyle=colors[tok[s]]; c.fillRect(a,y0,b-a,y1-y0); } }
+function fit(c,text,maxW){ if(c.measureText(text).width<=maxW) return text; let t=text; while(t.length>1&&c.measureText(t+"…").width>maxW) t=t.slice(0,-1); return t+"…"; }
+function wrap2(c,text,maxW){ if(c.measureText(text).width<=maxW) return [text]; const words=text.split(" "); let a="";
+  for(let k=0;k<words.length;k++){ const t=a?a+" "+words[k]:words[k]; if(c.measureText(t).width>maxW&&a){ return [a, fit(c,words.slice(k).join(" "),maxW)]; } a=t; } return [fit(c,a,maxW)]; }
+
+/* ---------- chart ---------- */
+const TICKS=["100%","10%","1%","0.1%","≤0.01%"];
+const cv=$("chart"), cx=cv.getContext("2d"), CH=250, PT=40, PB=222, LMIN=-4;
+const yOf=f=>PT+(PB-PT)*clamp(-(f>0?Math.log10(f):LMIN)/(-LMIN),0,1);
+function drawChart(){
+  const C=colors, n=model.list.length; cx.fillStyle=C["--surface"]; cx.fillRect(0,0,W,CH);
+  stageBands(cx,PT-8,PB+8);
+  cx.font=`11px ${C["--f-mono"]}`; cx.textBaseline="middle";
+  for(let d=0;d>=LMIN;d--){ const y=yOf(Math.pow(10,d)); cx.strokeStyle=C["--grid"]; cx.lineWidth=1; cx.beginPath(); cx.moveTo(FEEDZ-8,y+.5); cx.lineTo(W-14,y+.5); cx.stroke(); cx.fillStyle=C["--muted"]; cx.textAlign="right"; cx.fillText(TICKS[-d],FEEDZ-12,y); }
+  cx.textAlign="left"; cx.textBaseline="alphabetic"; cx.fillStyle=C["--fg"]; cx.font=`700 18px ${C["--f-display"]}`; cx.fillText("Remaining fraction C/C₀",14,23);
+  const tw=cx.measureText("Remaining fraction C/C₀").width; cx.fillStyle=C["--muted"]; cx.font=`11px ${C["--f-mono"]}`; cx.fillText("log scale · columns line up with the units below · red ring = may exceed target",14+tw+16,22);
+  const sel=G.units.find(g=>g.inst.key===selKey); if(sel){ cx.fillStyle=rgba(C["--accent"],0.07); cx.fillRect(sel.x0,PT-8,sel.w,PB-PT+16); }
+  const endX=W-OUTZ+30, labels=[];
+  chartSpecies().forEach(p=>{ const col=colorOf(p), c0=feed[p]; if(!c0) return;
+    const pts=[[FEEDZ-6,1]]; for(let k=0;k<n;k++){ const g=G.units[k]; pts.push([g.x0,model.C[k][p]/c0],[g.x1,model.C[k+1][p]/c0]); } pts.push([endX,model.C[n][p]/c0]);
+    cx.lineJoin="round"; cx.strokeStyle=col; cx.lineWidth=2.2; cx.beginPath(); pts.forEach(([x,f],i)=>{ const y=yOf(f); i?cx.lineTo(x,y):cx.moveTo(x,y); }); cx.stroke();
+    const last=pts[pts.length-1], ly=yOf(last[1]); cx.fillStyle=col; cx.beginPath(); cx.arc(last[0],ly,3.6,0,6.283); cx.fill();
+    const t=(P.targets||{})[p];
+    if(t&&t.limit!=null&&model.C[n][p]>t.limit){ cx.strokeStyle=C["--bad"]; cx.lineWidth=2; cx.beginPath(); cx.arc(last[0],ly,7.5,0,6.283); cx.stroke(); }
+    labels.push({y:ly,text:shortName(p),col}); });
+  labels.sort((a,b)=>a.y-b.y); let lastY=-99; for(const L of labels){ L.y=Math.max(L.y,lastY+12); lastY=L.y; }
+  cx.font=`11px ${C["--f-mono"]}`; cx.textAlign="left"; cx.textBaseline="middle"; for(const L of labels){ cx.fillStyle=L.col; cx.fillText(fit(cx,L.text,OUTZ-52),endX+12,Math.min(L.y,CH-8)); } cx.textBaseline="alphabetic";
+}
+
+/* ---------- flow schematic ---------- */
+const fv=$("flow"), fx=fv.getContext("2d"), FH=350, CY=150, UH=56, PIPE=11, CH_S=280, CH_B=320, BOXW=168;
+let parts=[], vapor=[], time=0, rates={}, acc={};
+function setupFlow(){
+  const old={}; (G.units||[]).forEach(g=>old[g.inst.key]=g.load||0); layout();
+  for(const g of G.units){ g.oy=g.u.path==="brine"?CH_B:CH_S; g.ox=g.u.mech==="membrane"?g.mx-8:(g.u.mech==="float"?g.x1+6:g.x0+g.w*0.5); g.load=old[g.inst.key]||0; g.gran=[];
+    if(g.u.mech==="media"){ let s=g.i*97+13; const rnd=()=>{ s=(s*9301+49297)%233280; return s/233280; }; for(let k=0;k<Math.round(g.w*0.5);k++) g.gran.push([g.x0+6+rnd()*(g.w-12),CY-UH*0.4+rnd()*UH*1.28,1.8+rnd()*2.2]); } }
+  const sp=[...ANIM_DEFAULT,...ANIM_OPTIONAL].filter(p=>animOn.has(p)&&feed[p]), total=reduce?30:90, w={}; let sum=0;
+  for(const p of sp){ w[p]=Math.log10(feed[p]/0.1+1); sum+=w[p]; }
+  rates={}; for(const p of sp){ rates[p]=sum?total*w[p]/sum:0; if(acc[p]==null) acc[p]=Math.random(); }
+  parts=parts.filter(p=>rates[p.s]);
+}
+function insideT(x){ for(const g of G.units){ if(x>=g.x0&&x<=g.x1){ return smooth(Math.min(1,Math.min(x-g.x0,g.x1-x)/22)); } } return 0; }
+function spawn(s){ parts.push({s,x:-4,y:CY,u:(Math.random()*2-1)*0.9,vx:(92+Math.random()*34)*(reduce?0.6:1),ph:Math.random()*6.28,st:"flow",next:0,remAt:null,g:null,t:0,a:1,vy:0}); }
+function decide(p,g){ if(p.remAt!==null) return; const r=((model.R[g.i]||{})[p.s]||{}).r||0; if(Math.random()<r){ p.g=g; p.remAt=g.u.mech==="membrane"?g.mx-3:g.x0+g.w*(0.18+Math.random()*0.55); } }
+function update(dt){
+  time+=dt;
+  for(const s in rates){ acc[s]+=rates[s]*dt; while(acc[s]>=1){ acc[s]-=1; spawn(s); } }
+  for(const g of G.units) g.load=Math.max(0,g.load-dt*0.02);
+  for(const p of parts){ const g=p.g;
+    switch(p.st){
+      case "flow":{ const t=insideT(p.x); p.x+=p.vx*(1-0.5*t)*dt;
+        while(p.next<G.units.length&&p.x>=G.units[p.next].x0){ decide(p,G.units[p.next]); p.next++; }
+        p.y=CY+p.u*(PIPE+(UH*0.8-PIPE)*t)+(reduce?0:Math.sin(time*2.3+p.ph)*1.2);
+        if(p.remAt!==null&&p.x>=p.remAt){ p.t=0; p.vy=0; const m=g.u.mech; p.st=m==="float"?"rise":m==="strip"?"gas":m==="settle"?"settle":m==="media"?"hold":"toout"; }
+        if(p.x>W+6) p.dead=true; break; }
+      case "hold": p.t+=dt; if(p.t>0.9){ p.st="toout"; g.load=Math.min(1,g.load+0.004); } break;
+      case "settle":{ const floor=CY+UH-4-g.load*12; p.vy+=160*dt; p.y+=p.vy*dt; if(p.y>=floor){ p.y=floor; p.st="toout"; g.load=Math.min(1,g.load+0.005); } break; }
+      case "rise":{ p.y-=70*dt; if(p.y<=CY-UH+5){ p.y=CY-UH+5; p.st="skim"; } break; }
+      case "skim":{ p.x+=55*dt; if(p.x>=g.x1+6){ p.x=g.x1+6; p.st="drop"; } break; }
+      case "gas":{ p.y-=60*dt; p.x+=Math.sin(time*3+p.ph)*8*dt; if(p.y<CY-UH-6) p.a=Math.max(0,p.a-dt*1.4); if(p.a<=0) p.dead=true; break; }
+      case "toout":{ p.x+=(g.ox-p.x)*Math.min(1,dt*4); p.y+=70*dt; if(p.y>=CY+UH){ p.x=g.ox; p.st="drop"; } break; }
+      case "drop":{ p.y+=95*dt; if(p.y>=g.oy){ p.y=g.oy+(Math.random()*2-1)*3; p.st="chan"; p.vx=70+Math.random()*25; } break; }
+      case "chan":{ p.x+=p.vx*dt*(reduce?0.6:1); if(p.x>W-BOXW-6){ p.a=Math.max(0,p.a-dt*2.2); if(p.a<=0) p.dead=true; } break; }
+    } }
+  parts=parts.filter(p=>!p.dead);
+  for(const g of G.units) if(g.u.mech==="thermal"&&Math.random()<dt*(reduce?4:9)) vapor.push({x:g.x0+g.w*(0.2+Math.random()*0.6),y:CY-8,t:0,r:2+Math.random()*2});
+  for(const v of vapor){ v.t+=dt; v.y-=24*dt; } vapor=vapor.filter(v=>v.t<2);
+}
+function murk(c){ const g=s=>c[s]||0, gf=s=>feed[s]||0;
+  return clamp(0.7*(g("Oil")+g("TSS"))/((gf("Oil")+gf("TSS"))||1)+0.3*Math.sqrt((g("TDS")+g("Hardness"))/((gf("TDS")+gf("Hardness"))||1)),0,1); }
+function rr(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+function drawFlow(){
+  const C=colors, c=fx, n=G.units.length; c.fillStyle=C["--surface"]; c.fillRect(0,0,W,FH);
+  c.strokeStyle=C["--grid"]; c.lineWidth=1; c.beginPath(); for(let x=0;x<=W;x+=24){ c.moveTo(x+.5,0); c.lineTo(x+.5,FH); } for(let y=0;y<=FH;y+=24){ c.moveTo(0,y+.5); c.lineTo(W,y+.5); } c.stroke();
+  stageBands(c,CY-UH-66,CY+UH+12);
+  c.font=`500 10.5px ${C["--f-mono"]}`; c.textAlign="center"; c.fillStyle=C["--muted"];
+  for(const s of MAIN){ const us=G.units.filter(g=>g.inst.stage===s); if(us.length) c.fillText(STAGE_NAME[s].toUpperCase(),(us[0].x0+us[us.length-1].x1)/2,CY-UH-54); }
+  // waste channels
+  for(const [path,y,lab] of [["solid",CH_S,"Sludge / solid waste"],["brine",CH_B,"Brine management"]]){
+    const col=path==="brine"?C["--brine"]:C["--solid"], has=G.units.some(g=>g.u.path===path);
+    c.fillStyle=rgba(col,has?0.14:0.05); c.fillRect(FEEDZ-40,y-8,W-BOXW-(FEEDZ-40)-6,16);
+    c.strokeStyle=rgba(col,has?0.7:0.3); c.lineWidth=1.2; c.beginPath(); c.moveTo(FEEDZ-40,y-8); c.lineTo(W-BOXW-6,y-8); c.moveTo(FEEDZ-40,y+8); c.lineTo(W-BOXW-6,y+8); c.stroke();
+    c.fillStyle=col; c.font=`500 11px ${C["--f-mono"]}`; c.textAlign="left"; c.fillText(lab,8,y-12);
+    const bx=W-BOXW, missing=path==="brine"&&!train.brine.length;
+    rr(c,bx,y-13,BOXW-10,26,6); c.fillStyle=C["--surface"]; c.fill(); c.setLineDash(missing?[4,3]:[]); c.strokeStyle=missing?C["--bad"]:col; c.lineWidth=1.4; c.stroke(); c.setLineDash([]);
+    c.fillStyle=missing?C["--bad"]:C["--fg"]; c.font=`11.5px ${C["--f-body"]}`; c.textAlign="center";
+    const txt=path==="brine"?(train.brine.length?train.brine.map(i=>U[i.unit].label).join(" + "):"No unit selected"):"Waste disposal";
+    c.fillText(fit(c,txt,BOXW-20),bx+(BOXW-10)/2,y+4);
+  }
+  // main pipe
+  const segs=[]; if(!n) segs.push([0,W,0]); else { segs.push([0,G.units[0].x0,0]); for(let i=0;i<n-1;i++) segs.push([G.units[i].x1,G.units[i+1].x0,i+1]); segs.push([G.units[n-1].x1,W,n]); }
+  for(const [a,b,k] of segs){ c.fillStyle=mix(C["--water-clear"],C["--water-murky"],murk(model.C[k]),0.5); c.fillRect(a,CY-PIPE-3,b-a,2*(PIPE+3));
+    c.strokeStyle=rgba(C["--fg"],0.45); c.lineWidth=1.4; c.beginPath(); c.moveTo(a,CY-PIPE-3); c.lineTo(b,CY-PIPE-3); c.moveTo(a,CY+PIPE+3); c.lineTo(b,CY+PIPE+3); c.stroke(); }
+  c.font=`12px ${C["--f-body"]}`; c.fillStyle=C["--muted"]; c.textAlign="left"; c.fillText("Influent",8,CY-PIPE-10);
+  { const px=(n?G.end:FEEDZ)+10; c.fillText("Product water",px,CY-PIPE-26); c.fillText(`${(model.Q[n]*100).toFixed(0)}% of feed flow`,px,CY-PIPE-10); }
+  if(!n){ c.textAlign="center"; c.font=`15px ${C["--f-body"]}`; c.fillText("The treatment train is empty. Drag units from the library.",W/2,CY-50); }
+  for(const g of G.units){
+    const top=CY-UH, bot=CY+UH, u=g.u, col=u.path==="brine"?C["--brine"]:C["--solid"], sel=g.inst.key===selKey;
+    if(u.mech!=="strip"&&u.mech!=="dose"){ c.strokeStyle=rgba(col,0.7); c.lineWidth=1.3; c.beginPath();
+      if(u.mech==="float"){ c.moveTo(g.x1,top+4); c.lineTo(g.x1+6,top+4); c.lineTo(g.x1+6,g.oy-8); } else { c.moveTo(g.ox-4,bot); c.lineTo(g.ox-4,g.oy-8); c.moveTo(g.ox+4,bot); c.lineTo(g.ox+4,g.oy-8); } c.stroke(); }
+    rr(c,g.x0,top,g.w,UH*2,8); c.fillStyle=mix(C["--water-clear"],C["--water-murky"],murk(model.C[g.i]),0.22); c.fill();
+    c.setLineDash(u.has_model?[]:[5,4]); c.lineWidth=sel?2.6:1.7; c.strokeStyle=sel?C["--fg"]:C["--accent"]; c.stroke(); c.setLineDash([]);
+    const ink=C["--accent"];
+    if(u.mech==="media"){ c.fillStyle=rgba(C["--sludge"],0.25+g.load*0.5); for(const q of g.gran){ c.beginPath(); c.arc(q[0],q[1],q[2],0,6.283); c.fill(); } }
+    else if(u.mech==="settle"){ const h=5+g.load*12,a=g.x0+g.w*0.1,b=g.x1-g.w*0.1; c.beginPath(); c.moveTo(a,bot-2); c.quadraticCurveTo((a+b)/2,bot-2-h*2,b,bot-2); c.closePath(); c.fillStyle=rgba(C["--sludge"],0.7); c.fill();
+      c.strokeStyle=rgba(C["--muted"],0.7); c.lineWidth=1.2; c.beginPath(); c.moveTo(g.x0+g.w*0.22,top+8); c.lineTo(g.x0+g.w*0.22,CY); c.stroke(); }
+    else if(u.mech==="membrane"){ const ro=/RO$/.test(u.label); c.setLineDash(ro?[]:[3,4]); c.lineWidth=ro?3.5:2.6; c.strokeStyle=ink; c.beginPath(); c.moveTo(g.mx,top+7); c.lineTo(g.mx,bot-7); c.stroke(); c.setLineDash([]); }
+    else if(u.mech==="thermal"){ c.strokeStyle=ink; c.lineWidth=1.5; c.beginPath(); const y=top+14,a=g.x0+g.w*0.14,b=g.x1-g.w*0.14; for(let x=a;x<=b;x+=2){ const yy=y+Math.sin((x-a)/6)*2.6; x===a?c.moveTo(x,yy):c.lineTo(x,yy);} c.stroke(); }
+    else if(u.mech==="float"){ c.fillStyle=rgba(C["--oil"],0.18+g.load*0.3); c.fillRect(g.x0+2,top+2,g.w-4,9);
+      if(u.name==="DAF"){ c.strokeStyle=rgba(C["--fg"],0.25); c.lineWidth=1; for(let k=0;k<6;k++){ const bx=g.x0+g.w*(0.2+0.12*k), by=bot-8-((time*30+k*17)%(UH*1.6)); c.beginPath(); c.arc(bx,by,1.8,0,6.283); c.stroke(); } } }
+    else if(u.mech==="strip"){ c.strokeStyle=ink; c.lineWidth=1.2; for(let k=0;k<4;k++){ const y=top+16+k*(UH*1.6/4); c.beginPath(); c.moveTo(g.x0+6,y); c.lineTo(g.x1-6,y+6); c.stroke(); } }
+    else if(u.mech==="dose"){ c.fillStyle=ink; for(let k=0;k<3;k++){ const yy=top+((time*40+k*20)%30); c.beginPath(); c.arc(g.x0+g.w*(0.35+0.15*k),yy,2,0,6.283); c.fill(); } }
+    c.textAlign="center"; c.fillStyle=C["--fg"]; c.font=`700 ${g.w<90?14:17}px ${C["--f-display"]}`;
+    const lines=wrap2(c,u.label,g.w+GAP-6); lines.forEach((t,k)=>c.fillText(t,g.x0+g.w/2,top-(lines.length===2?34:22)+k*15));
+    c.font=`11px ${C["--f-mono"]}`; c.fillStyle=C["--muted"]; c.fillText(`R ${(u.recovery*100).toFixed(u.recovery>0.99?1:0)}%`,g.x0+g.w/2,top-6);
+    if(u.residual){ const t=fit(c,u.residual,g.w+GAP-6), lx=u.mech==="float"?g.x0+g.w/2:g.ox, tw=c.measureText(t).width; c.fillStyle=C["--surface"]; c.fillRect(lx-tw/2-3,bot+6,tw+6,14); c.fillStyle=C["--muted"]; c.fillText(t,lx,bot+16); }
+  }
+  for(const p of parts){ const sp=SPEC[p.s]; c.fillStyle=C[sp.tok]; c.strokeStyle=C[sp.tok]; c.globalAlpha=p.a; drawShape(c,sp.shape,p.x,p.y,sp.r); }
+  c.globalAlpha=1; c.strokeStyle=C["--vapor"]; c.lineWidth=1.1;
+  for(const v of vapor){ c.globalAlpha=Math.max(0,1-v.t/2)*0.9; c.beginPath(); c.arc(v.x,v.y,v.r,0,6.283); c.stroke(); } c.globalAlpha=1;
+  let lx=W-14; c.textAlign="right"; c.font=`11px ${C["--f-mono"]}`;
+  [...ANIM_DEFAULT,...ANIM_OPTIONAL].filter(p=>rates[p]).reverse().forEach(p=>{ const t=shortName(p); c.fillStyle=C["--muted"]; c.fillText(t,lx,20); lx-=c.measureText(t).width+12; c.fillStyle=C[SPEC[p].tok]; c.strokeStyle=C[SPEC[p].tok]; drawShape(c,SPEC[p].shape,lx,16,SPEC[p].r); lx-=16; });
+}
+function drawShape(c,shape,x,y,r){
+  switch(shape){
+    case "square": c.fillRect(x-r,y-r,r*2,r*2); break;
+    case "diamond": c.beginPath(); c.moveTo(x,y-r*1.3); c.lineTo(x+r,y); c.lineTo(x,y+r*1.3); c.lineTo(x-r,y); c.fill(); break;
+    case "tri": c.beginPath(); c.moveTo(x,y-r*1.15); c.lineTo(x+r,y+r*0.8); c.lineTo(x-r,y+r*0.8); c.fill(); break;
+    case "trid": c.beginPath(); c.moveTo(x,y+r*1.15); c.lineTo(x+r,y-r*0.8); c.lineTo(x-r,y-r*0.8); c.fill(); break;
+    case "ring": c.lineWidth=1.6; c.beginPath(); c.arc(x,y,r,0,6.283); c.stroke(); break;
+    case "plus": c.lineWidth=1.8; c.beginPath(); c.moveTo(x-r,y); c.lineTo(x+r,y); c.moveTo(x,y-r); c.lineTo(x,y+r); c.stroke(); break;
+    default: c.beginPath(); c.arc(x,y,r,0,6.283); c.fill();
+  }
+}
+
+/* ---------- hover & click on canvases ---------- */
+const tip=$("tip");
+function colAt(xl){ for(const g of G.units){ if(xl>=g.x0-GAP/2&&xl<=g.x1+GAP/2) return {k:g.i+1,g}; } return {k:(!G.units.length||xl<G.start)?0:G.units.length}; }
+function onHover(e,canvas){
+  const r=canvas.getBoundingClientRect(), {k,g}=colAt((e.clientX-r.left)/r.width*W), sp=chartSpecies(); if(!sp.length){ tip.hidden=true; return; }
+  let h=`<b>${g?`${g.i+1}. ${esc(g.inst.unit)} outlet`:(k===0?"Feed":"Product water")}</b><table>`;
+  for(const p of sp){ const v=model.C[k][p], f=v/feed[p], x=g?model.R[g.i][p]:null;
+    h+=`<tr><td><span style="color:${swatch(p)}">■</span> ${esc(shortName(p))}</td><td>${fmt(v)}</td><td>${f*100<0.01&&f>0?"<0.01":(f*100).toFixed(f<0.1?2:0)}%</td>${g?`<td>−${pct(x?x.r:0,1)}</td>`:""}</tr>`; }
+  tip.innerHTML=h+`</table>${g?'<div class="hint">Click for unit details</div>':""}`; tip.hidden=false;
+  const wr=$("cwrap").getBoundingClientRect(); let left=e.clientX-wr.left+14, top=e.clientY-wr.top+12;
+  if(left+tip.offsetWidth>wr.width-6) left=e.clientX-wr.left-tip.offsetWidth-14; if(top+tip.offsetHeight>wr.height-6) top=wr.height-tip.offsetHeight-6;
+  tip.style.left=Math.max(4,left)+"px"; tip.style.top=Math.max(4,top)+"px"; canvas.style.cursor=g?"pointer":"default";
+}
+for(const cvs of [cv,fv]){
+  cvs.addEventListener("pointermove",e=>{ if(e.pointerType==="mouse") onHover(e,cvs); });
+  cvs.addEventListener("pointerleave",()=>tip.hidden=true);
+  cvs.addEventListener("click",e=>{ const r=cvs.getBoundingClientRect(), {g}=colAt((e.clientX-r.left)/r.width*W); if(g){ selKey=g.inst.key; rebuild(true); } });
+}
+
+/* ---------- rebuild & loop ---------- */
+function renderSide(){ renderWarnings(); renderFate(); renderExport(); }
+function rebuild(keepParticles){
+  compute(); setupFlow();
+  if(!keepParticles){ parts=[]; vapor=[]; for(let t=0;t<14;t+=0.05) update(0.05); }
+  renderLanes(); renderSpecies(); renderDetail(); renderSide();
+}
+function size(canvas,ctx,h){ const w=canvas.getBoundingClientRect().width; if(!w) return; const dpr=Math.min(2,window.devicePixelRatio||1); canvas.width=Math.round(w*dpr); canvas.height=Math.round(w*dpr*h/W); ctx.setTransform(canvas.width/W,0,0,canvas.height/h,0,0); }
+new ResizeObserver(()=>{ size(cv,cx,CH); size(fv,fx,FH); }).observe($("cwrap"));
+let last=performance.now();
+function frame(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; update(dt); drawChart(); drawFlow(); requestAnimationFrame(frame); }
+window.__explorer={get model(){ return model; }, get train(){ return train; }};
+if(P.standalone){ $("applyCard").hidden=true; $("pageHead").hidden=false; $("snapNote").hidden=false; $("snapNote").textContent=P.standalone.note||""; loadScenario(); } else loadPageTrain();
+renderCtx(); renderLib(); rebuild(); size(cv,cx,CH); size(fv,fx,FH); drawChart(); drawFlow(); requestAnimationFrame(frame);
+})();
+</script>
+</body></html>
