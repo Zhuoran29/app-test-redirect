@@ -639,7 +639,7 @@ function drawChart(){
   cx.font=`11px ${C["--f-mono"]}`; cx.textBaseline="middle";
   for(let d=0;d>=LMIN;d--){ const y=yOf(Math.pow(10,d)); cx.strokeStyle=C["--grid"]; cx.lineWidth=1; cx.beginPath(); cx.moveTo(FEEDZ-8,y+.5); cx.lineTo(W-14,y+.5); cx.stroke(); cx.fillStyle=C["--muted"]; cx.textAlign="right"; cx.fillText(TICKS[-d],FEEDZ-12,y); }
   cx.textAlign="left"; cx.textBaseline="alphabetic"; cx.fillStyle=C["--fg"]; cx.font=`700 18px ${C["--f-display"]}`; cx.fillText("Remaining fraction C/C₀",14,23);
-  const tw=cx.measureText("Remaining fraction C/C₀").width; cx.fillStyle=C["--muted"]; cx.font=`11px ${C["--f-mono"]}`; cx.fillText("log scale · columns line up with the units below · red ring = may exceed target",14+tw+16,22);
+  const tw=cx.measureText("Remaining fraction C/C₀").width; cx.fillStyle=C["--muted"]; cx.font=`11px ${C["--f-mono"]}`; cx.fillText("Log scaled",14+tw+16,22);
   const sel=G.units.find(g=>g.inst.key===selKey); if(sel){ cx.fillStyle=rgba(C["--accent"],0.07); cx.fillRect(sel.x0,PT-8,sel.w,PB-PT+16); }
   const endX=W-OUTZ+30, labels=[];
   chartSpecies().forEach(p=>{ const col=colorOf(p), c0=feed[p]; if(!c0) return;
