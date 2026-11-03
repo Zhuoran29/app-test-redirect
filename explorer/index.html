@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><title>Treatment Train Explorer</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Treatment Train Explorer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=JetBrains+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap">
@@ -142,7 +142,7 @@ textarea{width:100%;box-sizing:border-box;min-height:150px;font-family:var(--f-m
 .ic{display:inline-block;vertical-align:-1px;margin-right:6px;flex:none}
 .sp .ic{margin-right:0}
 @media (prefers-reduced-motion: reduce){.lane{transition:none}}
-</style>
+</style></head><body>
 
 <div class="wrap">
   <header class="phead" id="pageHead" hidden>
@@ -167,7 +167,7 @@ textarea{width:100%;box-sizing:border-box;min-height:150px;font-family:var(--f-m
         <div class="lane fixed" data-stage="solid"><div class="lname">Sludge / solid waste<small>Collected to waste disposal</small></div><div class="strip" id="solidStrip"></div></div>
       </div>
       <div class="msg" id="msg" role="alert"></div>
-      <div class="hint">Click a unit to view and adjust its removal efficiencies · drag a unit out of its stage to remove it · Shift+←/→ moves the selected unit, Delete removes it</div>
+      <div class="hint" id="laneHint" hidden>Click a unit to view and adjust its removal efficiencies · drag a unit out of its stage to remove it · Shift+←/→ moves the selected unit, Delete removes it</div>
     </div>
   </section>
 
@@ -539,8 +539,7 @@ function buildSuggestions(){
         actions:[{label:`Set ${U[x.i.unit].label} ${shortName(p)} to ${pct(rm.high,1)}`,run:()=>{ x.i.edits[p]=rm.high; }}],src:"UNIT_REMOVAL_RATES range"}); }
     else if(rangeUnits.length){ const map=new Map(rangeUnits.map(i=>[i,{[p]:U[i.unit].removals[p].high}])), v=productOf(withEdits(map),p);
       if(v<=lim) S.push({text:`<b>${esc(p)}</b>: raising the removal to the upper end of the removal-table range in ${rangeUnits.map(i=>`<b>${esc(U[i.unit].label)}</b>`).join(" and ")} brings the product to ${fmt(v)} ${esc(u)} (target ${fmt(lim)}).`,
-        actions:[{label:"Set all to upper end",run:()=>{ rangeUnits.forEach(i=>{ i.edits[p]=U[i.unit].removals[p].high; }); }}],src:"UNIT_REMOVAL_RATES range"});
-      else S.push({text:`<b>${esc(p)}</b>: even at the upper end of the removal-table ranges in the current units, the product stays near ${fmt(v)} ${esc(u)} (target ${fmt(lim)}); it needs a higher removal in another unit or an additional unit.`,src:"UNIT_REMOVAL_RATES range"}); }
+        actions:[{label:"Set all to upper end",run:()=>{ rangeUnits.forEach(i=>{ i.edits[p]=U[i.unit].removals[p].high; }); }}],src:"UNIT_REMOVAL_RATES range"}); }
     for(const lit of (P.literature||[]).filter(l=>l.param===p)){
       const hits=L.filter(i=>i.unit===lit.unit&&i.edits[p]==null&&lit.value>((model.R[L.indexOf(i)][p]||{}).r||0)+1e-9); if(!hits.length) continue;
       const v=productOf(withEdits(new Map(hits.map(i=>[i,{[p]:lit.value}]))),p), cur=(model.R[L.indexOf(hits[0])][p]||{}).r||0;
@@ -791,7 +790,7 @@ new ResizeObserver(()=>{ size(cv,cx,CH); size(fv,fx,FH); }).observe($("cwrap"));
 let last=performance.now();
 function frame(now){ const dt=Math.min(0.05,(now-last)/1000); last=now; update(dt); drawChart(); drawFlow(); requestAnimationFrame(frame); }
 window.__explorer={get model(){ return model; }, get train(){ return train; }};
-if(P.standalone){ $("applyCard").hidden=true; $("pageHead").hidden=false; $("snapNote").hidden=false; $("snapNote").textContent=P.standalone.note||""; loadScenario(); } else loadPageTrain();
+if(P.standalone){ $("laneHint").hidden=false; $("applyCard").hidden=true; $("pageHead").hidden=false; $("snapNote").hidden=false; $("snapNote").textContent=P.standalone.note||""; loadScenario(); } else loadPageTrain();
 renderCtx(); renderLib(); rebuild(); size(cv,cx,CH); size(fv,fx,FH); drawChart(); drawFlow(); requestAnimationFrame(frame);
 })();
 </script>
